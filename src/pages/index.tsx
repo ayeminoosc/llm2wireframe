@@ -16,6 +16,6 @@ const geistMono = Geist_Mono({
 
 export default function Home() {
   return (
-    <WFMLReactViewer />
+    <WFMLReactViewer height="100vh" />
   );
 }
