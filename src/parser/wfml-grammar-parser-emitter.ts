@@ -4,33 +4,10 @@
   ✅ LLM-friendly, indentation-based DSL → AST (WFJSON)
   ✅ Emitter back to WFML (canonical formatting)
   ✅ Comments preserved at node level (attached to meta.comments)
-  ✅ Basic placement expression parsing (below/rightOf/centerX/inside/inset/by)
-
-  Usage
-  -----
-  import {
-    parseWFML, emitWFML,
-    WFDocument, ParseResult
-  } from "./wfml-grammar-parser-emitter";
-
-  const src = `
-  meta:
-    version: 0.1
-    author: you
-  page Auth:
-    frame Phone:
-      w: 390
-      h: 844
-      text title:
-        text: "Welcome"
-        size: 24
-        place: below #logo by 12, centerX
-  `;
-
-  const { doc, errors } = parseWFML(src);
-  if (errors.length) console.error(errors);
-  const out = emitWFML(doc);
-  console.log(out);
+  ✅ Placement parser robust to commas inside parentheses (e.g., inset(8,16,8,16))
+  ✅ Robust block parsing across blank lines/comments
+  ✅ Arrow/Line typing via ConnectorBase (no TS2430)
+  ✅ style: blocks merge into node.style
 */
 
 // -----------------------------
@@ -90,8 +67,12 @@ export interface Diamond extends NodeBase { kind: "diamond" }
 export interface TextNode extends NodeBase { kind: "text"; text: string }
 export interface Icon extends NodeBase { kind: "icon"; name: string; pack?: string }
 export interface ImageNode extends NodeBase { kind: "image"; src: string; fit?: "cover"|"contain"|"stretch" }
-export interface Line extends NodeBase { kind: "line"; from?: AnchorRef; to?: AnchorRef; label?: string }
-export interface Arrow extends Line { kind: "arrow"; startHead?: ArrowHead; endHead?: ArrowHead; route?: "straight"|"orthogonal"|"curve" }
+
+// shared base for connectors
+export interface ConnectorBase extends NodeBase { from?: AnchorRef; to?: AnchorRef; label?: string }
+export interface Line extends ConnectorBase { kind: "line" }
+export interface Arrow extends ConnectorBase { kind: "arrow"; startHead?: ArrowHead; endHead?: ArrowHead; route?: "straight"|"orthogonal"|"curve" }
+
 export interface Polyline extends NodeBase { kind: "polyline"; points?: [number,number][] }
 export interface Freehand extends NodeBase { kind: "freehand"; points?: [number,number][] }
 export interface Sticky extends NodeBase { kind: "sticky"; text: string; color?: string }
@@ -139,13 +120,7 @@ function lexLines(src: string): LineToken[] {
     const text = (m[2] ?? "").trimEnd();
     const isBlank = text.trim().length === 0;
     const isComment = /^\s*(#|\/\/)/.test(raw);
-    // Tabs are not allowed.
-    if (/\t/.test(leading)) {
-      out.push({ lineNo: i + 1, indent: 0, raw, text, isComment: false, isBlank: false });
-      continue;
-    }
-    // Indent must be multiples of 2 spaces
-    const indent = Math.floor(leading.length / 2);
+    const indent = Math.floor(leading.replace(/\t/g, "  ").length / 2);
     out.push({ lineNo: i + 1, indent, raw, text, isComment, isBlank });
   }
   return out;
@@ -182,7 +157,7 @@ export function parseWFML(src: string): ParseResult {
 
     if (isHeader(tok, 0, "assets")) {
       C.i++; // consume 'assets:'
-      attachCommentsArray(doc.assets, C); // attach to section head (kept at doc.meta if needed)
+      attachCommentsArray(doc.assets, C);
       parseAssets(C, 1, doc.assets);
       continue;
     }
@@ -193,7 +168,6 @@ export function parseWFML(src: string): ParseResult {
       continue;
     }
 
-    // page NAME:
     const pageHdr = matchHeader(tok, 0, /^page\s+([^:]+):\s*$/);
     if (pageHdr) {
       C.i++;
@@ -230,19 +204,19 @@ function matchHeader(tok: LineToken, indent: number, re: RegExp): RegExpMatchArr
 }
 
 function parseKeyValuesInto(C: ParseContext, indent: number, target: any) {
-  while (peek(C) && peek(C)!.indent >= indent) {
+  while (peek(C)) {
     const tok = peek(C)!;
-    if (tok.indent > indent) { C.warnings.push({ line: tok.lineNo, message: "Extra indentation ignored" }); C.i++; continue; }
+    if (!tok.isBlank && !tok.isComment && tok.indent < indent) break;
     if (tok.isBlank) { C.i++; continue; }
     if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
+    if (tok.indent > indent) { C.warnings.push({ line: tok.lineNo, message: "Extra indentation ignored" }); C.i++; continue; }
     if (!/:/.test(tok.text)) break;
 
     const kv = tok.text.match(/^(.*?)\s*:\s*(.*)$/)!;
     const key = kv[1].trim();
     const valRaw = kv[2];
 
-    // Block header (ends with ':' but no value)
-    if (valRaw === "") { // a nested block like "shadow:"
+    if (valRaw === "") {
       C.i++;
       const obj: any = {};
       attachComments(obj, C);
@@ -251,7 +225,6 @@ function parseKeyValuesInto(C: ParseContext, indent: number, target: any) {
       continue;
     }
 
-    // Single-line value
     const value = parseValue(valRaw.trim(), tok.lineNo, C);
     setDeep(target, key, value);
     C.i++;
@@ -259,30 +232,27 @@ function parseKeyValuesInto(C: ParseContext, indent: number, target: any) {
 }
 
 function parseAssets(C: ParseContext, indent: number, out: Asset[]) {
-  while (peek(C) && peek(C)!.indent >= indent) {
+  while (peek(C)) {
     const tok = peek(C)!;
+    if (!tok.isBlank && !tok.isComment && tok.indent < indent) break;
     if (tok.isBlank) { C.i++; continue; }
     if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
     if (tok.indent !== indent) break;
 
-    // list item starting with '-'
     const li = tok.text.match(/^-(.*)$/);
     if (!li) { C.errors.push({ line: tok.lineNo, column: 1, message: "Expected '- ...' in assets" }); C.i++; continue; }
 
-    // Parse either "- id: @logo" (kv on same line) or nested kvs under next indent
     const rest = li[1].trim();
     const asset: any = {};
     attachComments(asset, C);
 
     if (rest) {
-      // treat as another kv on same line if present 'key: value'
       const kv = rest.match(/^(.*?)\s*:\s*(.*)$/);
       if (kv) {
         const key = kv[1].trim();
         const valRaw = kv[2].trim();
         setDeep(asset, key, parseValue(valRaw, tok.lineNo, C));
         C.i++;
-        // read further nested kvs at indent+1
         if (peek(C) && peek(C)!.indent === indent + 1) parseKeyValuesInto(C, indent + 1, asset);
       } else {
         C.i++;
@@ -293,7 +263,6 @@ function parseAssets(C: ParseContext, indent: number, out: Asset[]) {
       if (peek(C) && peek(C)!.indent === indent + 1) parseKeyValuesInto(C, indent + 1, asset);
     }
 
-    // Normalize
     const normalized: Asset = {
       id: String(asset.id ?? asset.name ?? genId("asset")),
       kind: (asset.type ?? asset.kind ?? "image") as Asset["kind"],
@@ -306,8 +275,9 @@ function parseAssets(C: ParseContext, indent: number, out: Asset[]) {
 }
 
 function parseComponents(C: ParseContext, indent: number, out: Component[]) {
-  while (peek(C) && peek(C)!.indent >= indent) {
+  while (peek(C)) {
     const tok = peek(C)!;
+    if (!tok.isBlank && !tok.isComment && tok.indent < indent) break;
     if (tok.isBlank) { C.i++; continue; }
     if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
     if (tok.indent !== indent) break;
@@ -324,8 +294,9 @@ function parseComponents(C: ParseContext, indent: number, out: Component[]) {
 }
 
 function parsePage(C: ParseContext, indent: number, page: Page) {
-  while (peek(C) && peek(C)!.indent >= indent) {
+  while (peek(C)) {
     const tok = peek(C)!;
+    if (!tok.isBlank && !tok.isComment && tok.indent < indent) break;
     if (tok.isBlank) { C.i++; continue; }
     if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
     if (tok.indent !== indent) break;
@@ -342,8 +313,9 @@ function parsePage(C: ParseContext, indent: number, page: Page) {
 }
 
 function parseNodesLike(C: ParseContext, indent: number, out: Node[]) {
-  while (peek(C) && peek(C)!.indent >= indent) {
+  while (peek(C)) {
     const tok = peek(C)!;
+    if (!tok.isBlank && !tok.isComment && tok.indent < indent) break;
     if (tok.isBlank) { C.i++; continue; }
     if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
     if (tok.indent !== indent) break;
@@ -361,7 +333,6 @@ function parseNodesLike(C: ParseContext, indent: number, out: Node[]) {
       parseNodeBlock(C, indent + 1, group, true);
       out.push(group);
     } else if (kind === "use") {
-      // 'use ComponentName instanceId:' block
       const [compName, instId] = splitFirst(id, /\s+/);
       const inst: Instance = { kind: "instance", id: slugify(instId || compName), of: compName.trim() } as any;
       attachComments(inst, C);
@@ -377,20 +348,19 @@ function parseNodesLike(C: ParseContext, indent: number, out: Node[]) {
 }
 
 function parseNodeBlock(C: ParseContext, indent: number, node: any, canHaveChildren: boolean) {
-  while (peek(C) && peek(C)!.indent >= indent) {
+  while (peek(C)) {
     const tok = peek(C)!;
+    if (!tok.isBlank && !tok.isComment && tok.indent < indent) break;
     if (tok.isBlank) { C.i++; continue; }
     if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
     if (tok.indent !== indent) break;
 
-    // Nested node header becomes child (if allowed)
     if (canHaveChildren && /^(use|group|rect|ellipse|diamond|text|icon|image|arrow|line|polyline|sticky|freehand)\s+/.test(tok.text)) {
       if (!node.children) node.children = [];
       parseNodesLike(C, indent, node.children);
       continue;
     }
 
-    // Key-values
     const kv = tok.text.match(/^(.*?)\s*:\s*(.*)$/);
     if (!kv) { C.errors.push({ line: tok.lineNo, column: 1, message: "Expected key: value" }); C.i++; continue; }
 
@@ -398,7 +368,6 @@ function parseNodeBlock(C: ParseContext, indent: number, node: any, canHaveChild
     const valRaw = kv[2];
 
     if (valRaw === "") {
-      // nested object block
       C.i++;
       const obj: any = {};
       attachComments(obj, C);
@@ -413,15 +382,12 @@ function parseNodeBlock(C: ParseContext, indent: number, node: any, canHaveChild
 }
 
 function assignNodeKey(node: any, key: string, value: any, line: number, C: ParseContext) {
-  // Known mappings
   const baseKeys = new Set(["id","name","z","lock","hidden","opacity","x","y","w","h","rotation","tags"]);
   const styleKeys = new Set(["fill","stroke","strokeWidth","dash","corner","shadow","sketch","roughness","seed"]);
   const textStyleKeys = new Set(["font","size","weight","align","wrap","autoSize"]);
 
-  if (key === "place") {
-    node.place = parsePlacement(String(value), line, C);
-    return;
-  }
+  if (key === "place") { node.place = parsePlacement(String(value), line, C); return; }
+  if (key === "style" && typeof value === "object") { node.style = { ...(node.style||{}), ...value }; return; }
   if (baseKeys.has(key)) { (node as any)[key] = value; return; }
   if (styleKeys.has(key)) { node.style = node.style || {}; (node.style as any)[key] = value; return; }
 
@@ -432,13 +398,10 @@ function assignNodeKey(node: any, key: string, value: any, line: number, C: Pars
   if ((node.kind === "line" || node.kind === "arrow") && (key === "from" || key === "to")) { (node as any)[key] = parseAnchor(String(value)); return; }
   if ((node.kind === "arrow") && (key === "startHead" || key === "endHead" || key === "route")) { (node as any)[key] = value; return; }
   if ((node.kind === "polyline" || node.kind === "freehand") && key === "points") { (node as any)[key] = value; return; }
-  if (key === "text" && textStyleKeys.has("size") === false) { // generic text content for unknown kinds
-    node.text = value; return;
-  }
+  if (key === "text" && textStyleKeys.has("size") === false) { node.text = value; return; }
 
   if (key.includes(".")) { setDeep(node, key, value); return; }
 
-  // unknown -> extra
   node.extra = node.extra || {}; node.extra[key] = value;
 }
 
@@ -457,45 +420,53 @@ function parseValue(raw: string, line: number, C: ParseContext): any {
     try { return JSON.parse(jsonishToJson(t)); }
     catch (e) { C.errors.push({ line, column: 1, message: `Invalid JSON-ish value: ${t}` }); return t; }
   }
-  return t; // bare word
+  return t;
 }
 
 function unquote(s: string) { return s.replace(/^['\"]|['\"]$/g, "").replace(/\\n/g, "\n").replace(/\\\"/g, '"') }
 function jsonishToJson(s: string) { return s.replace(/(['\"])\s*:/g, '"$1":').replace(/'([^']*)'/g, '"$1"') }
 
 function parseAnchor(s: string): AnchorRef {
-  // formats: "#id", "#id.anchor", or just "#id" with optional anchor keywords
   const m = s.trim().match(/^#([\w-]+)(?:\.(center|top|bottom|left|right|auto))?$/);
   if (m) return { ref: m[1], anchor: (m[2] as any) };
   return { ref: s.replace(/^#/, "") };
 }
 
+// Split by commas that are **not** inside parentheses
+function splitPlaceParts(s: string): string[] {
+  const parts: string[] = [];
+  let cur = "";
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '(') { depth++; cur += ch; continue; }
+    if (ch === ')') { if (depth > 0) depth--; cur += ch; continue; }
+    if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ""; continue; }
+    cur += ch;
+  }
+  if (cur.trim().length) parts.push(cur.trim());
+  return parts;
+}
+
 function parsePlacement(s: string, line: number, C: ParseContext): PlacementRule[] {
-  // e.g., "below #logo by 12, centerX, inside #frame inset(16)"
-  const parts = s.split(/,\s*/);
+  const parts = splitPlaceParts(s);
   const rules: PlacementRule[] = [];
-  for (const p of parts) {
+  for (const frag0 of parts) {
+    const frag = frag0.trim();
+    if (!frag) continue;
     let m: RegExpMatchArray | null;
-    if ((m = p.match(/^below\s+#([\w-]+)(?:\s+by\s+([\d.]+))?$/))) {
-      rules.push({ type: "below", ref: m[1], by: m[2] ? Number(m[2]) : undefined }); continue;
-    }
-    if ((m = p.match(/^above\s+#([\w-]+)(?:\s+by\s+([\d.]+))?$/))) {
-      rules.push({ type: "above", ref: m[1], by: m[2] ? Number(m[2]) : undefined }); continue;
-    }
-    if ((m = p.match(/^rightOf\s+#([\w-]+)(?:\s+by\s+([\d.]+))?$/))) {
-      rules.push({ type: "rightOf", ref: m[1], by: m[2] ? Number(m[2]) : undefined }); continue;
-    }
-    if ((m = p.match(/^leftOf\s+#([\w-]+)(?:\s+by\s+([\d.]+))?$/))) {
-      rules.push({ type: "leftOf", ref: m[1], by: m[2] ? Number(m[2]) : undefined }); continue;
-    }
-    if ((m = p.match(/^centerX(?:\s+of\s+#([\w-]+))?$/))) { rules.push({ type: "centerX", ref: m[1] }); continue; }
-    if ((m = p.match(/^centerY(?:\s+of\s+#([\w-]+))?$/))) { rules.push({ type: "centerY", ref: m[1] }); continue; }
-    if ((m = p.match(/^centered(?:\s+in\s+#([\w-]+))?$/))) { rules.push({ type: "centered", ref: m[1] }); continue; }
-    if ((m = p.match(/^alignLeft\s+#([\w-]+)$/))) { rules.push({ type: "alignLeft", ref: m[1] }); continue; }
-    if ((m = p.match(/^alignRight\s+#([\w-]+)$/))) { rules.push({ type: "alignRight", ref: m[1] }); continue; }
-    if ((m = p.match(/^alignTop\s+#([\w-]+)$/))) { rules.push({ type: "alignTop", ref: m[1] }); continue; }
-    if ((m = p.match(/^alignBottom\s+#([\w-]+)$/))) { rules.push({ type: "alignBottom", ref: m[1] }); continue; }
-    if ((m = p.match(/^inside\s+#([\w-]+)(?:\s+inset\(([^)]*)\))?$/))) {
+    if ((m = frag.match(/^below\s+#([\w-]+)(?:\s+by\s+([\d.]+))?$/))) { rules.push({ type: "below", ref: m[1], by: m[2] ? Number(m[2]) : undefined }); continue; }
+    if ((m = frag.match(/^above\s+#([\w-]+)(?:\s+by\s+([\d.]+))?$/))) { rules.push({ type: "above", ref: m[1], by: m[2] ? Number(m[2]) : undefined }); continue; }
+    if ((m = frag.match(/^rightOf\s+#([\w-]+)(?:\s+by\s+([\d.]+))?$/))) { rules.push({ type: "rightOf", ref: m[1], by: m[2] ? Number(m[2]) : undefined }); continue; }
+    if ((m = frag.match(/^leftOf\s+#([\w-]+)(?:\s+by\s+([\d.]+))?$/))) { rules.push({ type: "leftOf", ref: m[1], by: m[2] ? Number(m[2]) : undefined }); continue; }
+    if ((m = frag.match(/^centerX(?:\s+of\s+#([\w-]+))?$/))) { rules.push({ type: "centerX", ref: m[1] }); continue; }
+    if ((m = frag.match(/^centerY(?:\s+of\s+#([\w-]+))?$/))) { rules.push({ type: "centerY", ref: m[1] }); continue; }
+    if ((m = frag.match(/^centered(?:\s+in\s+#([\w-]+))?$/))) { rules.push({ type: "centered", ref: m[1] }); continue; }
+    if ((m = frag.match(/^alignLeft\s+#([\w-]+)$/))) { rules.push({ type: "alignLeft", ref: m[1] }); continue; }
+    if ((m = frag.match(/^alignRight\s+#([\w-]+)$/))) { rules.push({ type: "alignRight", ref: m[1] }); continue; }
+    if ((m = frag.match(/^alignTop\s+#([\w-]+)$/))) { rules.push({ type: "alignTop", ref: m[1] }); continue; }
+    if ((m = frag.match(/^alignBottom\s+#([\w-]+)$/))) { rules.push({ type: "alignBottom", ref: m[1] }); continue; }
+    if ((m = frag.match(/^inside\s+#([\w-]+)(?:\s+inset\(([^)]*)\))?$/))) {
       let inset: any = undefined;
       if (m[2]) {
         const nums = m[2].split(/\s*,\s*/).map(Number);
@@ -504,7 +475,7 @@ function parsePlacement(s: string, line: number, C: ParseContext): PlacementRule
       rules.push({ type: "inside", ref: m[1], inset });
       continue;
     }
-    C.warnings.push({ line, message: `Unknown placement fragment: '${p}'` });
+    C.warnings.push({ line, message: `Unknown placement fragment: '${frag}'` });
   }
   return rules;
 }
@@ -543,20 +514,15 @@ export function emitWFML(doc: WFDocument, opts: EmitOptions = {}): string {
     for (const c of cs) b.push(IND.repeat(level) + `# ${c}`);
   };
 
-  // meta
   b.push(`meta:`);
   pushComments(doc.meta.comments, 1);
   emitObjectKV(b, doc.meta, 1, IND, new Set(["comments"]));
   b.push("");
 
-  // assets
   if (doc.assets?.length) {
     b.push(`assets:`);
     for (const a of doc.assets) {
-      if ((a as any).__sectionComment) { // section-level comment placeholder
-        pushComments(a.comments, 1);
-        continue;
-      }
+      if ((a as any).__sectionComment) { pushComments(a.comments, 1); continue; }
       pushComments(a.comments, 1);
       b.push(IND + `- id: ${a.id}`);
       b.push(IND + IND + `type: ${a.kind}`);
@@ -566,7 +532,6 @@ export function emitWFML(doc: WFDocument, opts: EmitOptions = {}): string {
     b.push("");
   }
 
-  // components
   if (doc.components?.length) {
     b.push(`components:`);
     for (const c of doc.components) {
@@ -577,7 +542,6 @@ export function emitWFML(doc: WFDocument, opts: EmitOptions = {}): string {
     b.push("");
   }
 
-  // pages
   for (const p of doc.pages) {
     pushComments(p.comments);
     b.push(`page ${p.name}:`);
@@ -690,7 +654,7 @@ function quoteIfNeeded(s: string) { return /\s|:/.test(s) ? JSON.stringify(s) : 
 function formatValue(v: any): string {
   if (typeof v === "string") {
     if (/^#[0-9a-fA-F]{3,8}$/.test(v)) return v;
-    if (/^[\w-.]+$/.test(v)) return v; // bare word
+    if (/^[\w-.]+$/.test(v)) return v;
     return JSON.stringify(v);
   }
   if (typeof v === "number" || typeof v === "boolean" || v === null) return String(v);
