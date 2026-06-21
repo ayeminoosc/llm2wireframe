@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 
 // ⬇️ Adjust this to your parser location
-import { parseWFML } from "../parser/wfml-grammar-parser-emitter";
+import { parseWFML, emitWFML } from "../parser/wfml-grammar-parser-emitter";
 
 // ---- Lightweight viewer types ----
 type PlacementRule =
@@ -121,6 +121,7 @@ page Auth:
   const [view, setView] = useState<ViewerDoc | null>(null);
   
   // Interactive state
+  const [showCode, setShowCode] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const nodeRefs = useRef<Record<string, SVGGElement | null>>({});
@@ -207,52 +208,115 @@ page Auth:
     }
   };
 
+  const handleInsertNode = (kind: string) => {
+    try {
+      const res = parseWFML(src) as any;
+      const doc = res.doc;
+      if (!doc) return;
+      
+      if (!doc.pages || doc.pages.length === 0) {
+        doc.pages = [{ kind: "page", id: "page1", name: "Page 1", frames: [] }];
+      }
+      const page = doc.pages[0];
+      if (!page.frames || page.frames.length === 0) {
+        page.frames = [{ kind: "frame", id: "frame1", name: "Frame 1", w: 390, h: 844, children: [] }];
+      }
+      
+      const frame = page.frames[0];
+      if (!frame.children) frame.children = [];
+      
+      const id = `${kind}-${Math.floor(Math.random() * 10000)}`;
+      const newNode: any = { kind, id, x: 50, y: 50 };
+      
+      if (kind === "rect" || kind === "flex") { newNode.w = 100; newNode.h = 100; }
+      if (kind === "text") { newNode.text = "New Text"; }
+      if (kind === "image") { newNode.src = "https://dummyimage.com/100x100/2b59ff/ffffff.png&text=Img"; newNode.w = 100; newNode.h = 100; }
+      
+      frame.children.push(newNode);
+      const newSrc = emitWFML(doc);
+      setSrc(newSrc);
+      
+      // Automatically show the code panel so the user sees the update
+      setShowCode(true);
+    } catch (e) {
+      console.error("Failed to insert node", e);
+    }
+  };
+
   const styles: Record<string, React.CSSProperties> = {
     wrap: {
-      width: "100%", height, display: "grid",
-      gridTemplateColumns: "1fr 1fr", gap: 16, padding: 16,
-      boxSizing: "border-box", background: "#f5f6fa"
+      width: "100vw", height: "100vh", position: "fixed", top: 0, left: 0,
+      background: "#f5f6fa", overflow: "hidden", fontFamily: "sans-serif"
     },
-    col: { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
-    header: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
-    button: { padding: "6px 10px", borderRadius: 10, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer" },
+    canvas: {
+      width: "100%", height: "100%", overflow: "auto", position: "absolute", top: 0, left: 0,
+      display: "flex", alignItems: "center", justifyContent: "center"
+    },
+    toolbar: {
+      position: "absolute", top: 24, left: "50%", transform: "translateX(-50%)",
+      display: "flex", gap: 8, padding: 8, background: "#fff", borderRadius: 8,
+      boxShadow: "0 4px 12px rgba(0,0,0,0.1)", zIndex: 10
+    },
+    toolBtn: {
+      padding: "8px 12px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 4, fontWeight: 600, color: "#475569"
+    },
+    floatingBtn: {
+      position: "absolute", top: 24, right: 24, zIndex: 10,
+      padding: "8px 16px", borderRadius: 8, border: "none", background: "#2B59FF", color: "#fff", cursor: "pointer", fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+    },
+    codePanel: {
+      position: "absolute", top: 0, right: showCode ? 0 : "-400px", width: 400, height: "100%",
+      background: "#fff", boxShadow: "-2px 0 20px rgba(0,0,0,0.15)", transition: "right 0.3s ease",
+      display: "flex", flexDirection: "column", zIndex: 20
+    },
+    codeHeader: {
+      padding: 16, borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center"
+    },
     textarea: {
-      flex: 1, minHeight: 240,
-      fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontSize: 12,
-      padding: 10, borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff"
+      flex: 1, border: "none", outline: "none", padding: 16,
+      fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontSize: 12, resize: "none", width: "100%", boxSizing: "border-box"
     },
-    preview: {
-      position: "relative", background: "#fff",
-      border: "1px solid #e5e7eb", borderRadius: 12, padding: 12,
-      overflow: "auto", minWidth: 0, minHeight: 0
-    },
-    pageTitle: { fontSize: 13, color: "#475569", marginBottom: 8, fontWeight: 600 },
-    frameWrap: { display: "inline-block", background: "#f1f5f9", border: "1px dashed #e5e7eb", borderRadius: 12, padding: 12 },
-    svg: { background: "#fff", borderRadius: 8, boxShadow: "inset 0 0 0 1px #e5e7eb" },
-    error: { marginTop: 8, fontSize: 12, color: "#b91c1c", whiteSpace: "pre-wrap", fontFamily: "ui-monospace, Menlo, Consolas, monospace" },
-    title: { margin: 0, fontSize: 18, fontWeight: 700 },
+    error: { padding: 16, color: "#b91c1c", background: "#fef2f2", fontSize: 12, fontFamily: "ui-monospace, Menlo, Consolas, monospace", overflow: "auto", maxHeight: 200 },
+    title: { margin: 0, fontSize: 16, fontWeight: 700 },
+    frameWrap: { display: "inline-block", background: "#fff", boxShadow: "0 8px 30px rgba(0,0,0,0.08)", borderRadius: 12, overflow: "hidden", border: "1px solid #e2e8f0" },
+    svg: { display: "block", background: "#fff" }
   };
 
   return (
     <div style={styles.wrap}>
-      {/* LEFT: editor */}
-      <div style={styles.col}>
-        <div style={styles.header}>
-          <h2 style={styles.title}>WFML (left) → SVG (right)</h2>
-          <button type="button" style={styles.button} onClick={rebuild}>Re-render</button>
+      {/* Floating Toolbar */}
+      <div style={styles.toolbar}>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('rect')}>▱ Rect</button>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('text')}>T Text</button>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('image')}>🖼 Image</button>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('flex')}>◫ Flex</button>
+      </div>
+
+      {/* Floating Action Button for Code */}
+      {!showCode && (
+        <button style={styles.floatingBtn} onClick={() => setShowCode(true)}>
+          {`</> Edit WFML`}
+        </button>
+      )}
+
+      {/* Code Sidebar */}
+      <div style={styles.codePanel}>
+        <div style={styles.codeHeader}>
+          <h2 style={styles.title}>WFML Editor</h2>
+          <button style={{...styles.toolBtn, padding: "4px 8px"}} onClick={() => setShowCode(false)}>Close</button>
         </div>
         <textarea style={styles.textarea} value={src} onChange={(e) => setSrc(e.target.value)} spellCheck={false} />
         {parseErrors.length ? <div style={styles.error}>{parseErrors.map((e: any) => `L${e.line}: ${e.message}`).join("\n")}</div> : null}
+        <button type="button" style={{...styles.floatingBtn, position: "relative", top: 0, right: 0, margin: 16, width: "calc(100% - 32px)"}} onClick={rebuild}>Re-render</button>
       </div>
 
-      {/* RIGHT: preview */}
-      <div style={styles.preview}>
+      {/* MAIN CANVAS */}
+      <div style={styles.canvas} onPointerDown={() => setSelectedId(null)}>
         {!view ? (
           <div style={{ color: "#64748b" }}>No parse result.</div>
         ) : (
           view.pages.map((p) => (
-            <div key={p.id} style={{ marginBottom: 24 }}>
-              <div style={styles.pageTitle}>Page: {p.name}</div>
+            <div key={p.id} style={{ padding: 80, display: "flex", gap: 60, flexWrap: "wrap", justifyContent: "center", alignItems: "flex-start", minHeight: "100%", boxSizing: "border-box" }}>
               {p.frames.map((f) => (
                 <div key={f.id} style={styles.frameWrap}>
                   <svg 
