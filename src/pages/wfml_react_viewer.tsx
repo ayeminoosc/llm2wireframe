@@ -20,15 +20,22 @@ type PlacementRule =
   | { type: "inside"; ref: string; inset?: number | [number, number, number, number] };
 
 type ViewerNode = {
-  kind: "rect" | "text" | "image";
+  kind: string; // Dynamic for plugins
   id: string;
-  x?: number; y?: number; w?: number; h?: number;
+  x?: number; y?: number; w?: number | "fill" | "hug" | "auto"; h?: number | "fill" | "hug" | "auto";
   text?: string; src?: string;
   style?: {
     fill?: string; stroke?: string; strokeWidth?: number; corner?: number;
     text?: { size?: number; weight?: number; align?: "left" | "center" | "right" }
   };
   place?: PlacementRule[];
+  // Flex layout props
+  direction?: "row" | "column";
+  gap?: number;
+  align?: "start" | "center" | "end" | "stretch";
+  justify?: "start" | "center" | "end" | "between";
+  padding?: number;
+  children?: ViewerNode[];
 };
 
 type ViewerFrame = { id: string; name?: string; w: number; h: number; style?: any; children: ViewerNode[] };
@@ -49,53 +56,63 @@ page Auth:
     style:
       fill: #F5F6FA
 
-    image logo:
-      src: https://dummyimage.com/64x64/2b59ff/ffffff.png&text=U
-      w: 64
-      h: 64
-      place: centered in #iPhone13, above #title by 60
+    flex container:
+      direction: column
+      gap: 24
+      padding: 32
+      align: center
+      w: fill
+      h: hug
+      place: centered in #iPhone13
 
-    text title:
-      text: "Welcome back"
-      style:
-        text:
-          size: 24
-          weight: 700
-      place: below #logo by 12, centerX
+      image logo:
+        src: https://dummyimage.com/64x64/2b59ff/ffffff.png&text=U
+        w: 64
+        h: 64
 
-    rect email:
-      w: 300
-      h: 44
-      style:
-        fill: #ffffff
-        stroke: #999
-        corner: 10
-      place: below #title by 24, centerX
+      text title:
+        text: "Welcome back"
+        style:
+          text:
+            size: 24
+            weight: 700
 
-    rect password:
-      w: 300
-      h: 44
-      style:
-        fill: #ffffff
-        stroke: #999
-        corner: 10
-      place: below #email by 12, alignLeft #email
+      flex form:
+        direction: column
+        gap: 16
+        w: fill
+        h: hug
 
-    rect loginbtn:
-      w: 300
-      h: 44
-      style:
-        fill: #2B59FF
-        corner: 10
-      place: below #password by 16, centerX
+        rect email:
+          w: fill
+          h: 44
+          style:
+            fill: #ffffff
+            stroke: #999
+            corner: 10
+            
+        rect password:
+          w: fill
+          h: 44
+          style:
+            fill: #ffffff
+            stroke: #999
+            corner: 10
 
-    text logintext:
-      text: "Sign in"
-      style:
-        text:
-          size: 16
-          weight: 600
-      place: centered in #loginbtn
+        rect loginbtn:
+          w: fill
+          h: 44
+          style:
+            fill: #2B59FF
+            corner: 10
+          
+          text logintext:
+            text: "Sign in"
+            style:
+              text:
+                size: 16
+                weight: 600
+            place: centered in #loginbtn
 `;
 
   const [src, setSrc] = useState(SAMPLE);
@@ -167,31 +184,53 @@ page Auth:
                 <div key={f.id} style={styles.frameWrap}>
                   <svg width={f.w} height={f.h} style={styles.svg}>
                     {f.style?.fill && <rect x={0} y={0} width={f.w} height={f.h} fill={f.style.fill} />}
-                    {f.children.map((n) => {
+                    {f.children.map(function renderNode(n): React.ReactNode {
                       const toNum = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
                       const x = toNum(n.x, 0), y = toNum(n.y, 0), w = toNum(n.w, 100), h = toNum(n.h, 24);
                       const sw = n.style?.strokeWidth ?? 1;
                       const fill = n.style?.fill ?? (n.kind === "rect" ? "#fff" : "none");
-                      const stroke = n.style?.stroke ?? "#1e293b22";
+                      const stroke = n.style?.stroke ?? (n.kind === "flex" ? "none" : "#1e293b22");
                       const corner = n.style?.corner ?? 8;
 
-                      if (n.kind === "rect")
+                      if (n.kind === "flex") {
+                        return (
+                          <g key={n.id}>
+                            {fill !== "none" && <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />}
+                            {n.children?.map(renderNode)}
+                          </g>
+                        );
+                      }
+
+                      if (n.kind === "rect") {
+                        if (n.children?.length) {
+                          return (
+                            <g key={n.id}>
+                              <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />
+                              {n.children.map(renderNode)}
+                            </g>
+                          );
+                        }
                         return <rect key={n.id} x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />;
+                      }
 
                       if (n.kind === "image")
                         return <image key={n.id} x={x} y={y} width={w} height={h} href={n.src} preserveAspectRatio="xMidYMid meet" />;
 
                       // text
-                      const txtSize = n.style?.text?.size ?? 14;
-                      const weight = n.style?.text?.weight ?? 600;
-                      const align = n.style?.text?.align ?? "center";
-                      const padX = 8;
-                      const txt = n.text || "";
-                      const estW = Math.max(w, txt.length * (txtSize * 0.6) + padX * 2);
-                      const anchor = align === "center" ? "middle" : align === "left" ? "start" : "end";
-                      const tx = align === "center" ? x + estW / 2 : align === "left" ? x + padX : x + estW - padX;
-                      const ty = y + h / 2 + txtSize * 0.35;
-                      return <text key={n.id} x={tx} y={ty} textAnchor={anchor} fontSize={txtSize} fontWeight={weight} fill="#0f172a">{txt}</text>;
+                      if (n.kind === "text") {
+                        const txtSize = n.style?.text?.size ?? 14;
+                        const weight = n.style?.text?.weight ?? 600;
+                        const align = n.style?.text?.align ?? "center";
+                        const padX = 8;
+                        const txt = n.text || "";
+                        const estW = Math.max(w, txt.length * (txtSize * 0.6) + padX * 2);
+                        const anchor = align === "center" ? "middle" : align === "left" ? "start" : "end";
+                        const tx = align === "center" ? x + estW / 2 : align === "left" ? x + padX : x + estW - padX;
+                        const ty = y + h / 2 + txtSize * 0.35;
+                        return <text key={n.id} x={tx} y={ty} textAnchor={anchor} fontSize={txtSize} fontWeight={weight} fill="#0f172a">{txt}</text>;
+                      }
+                      
+                      return null;
                     })}
                   </svg>
                 </div>
@@ -211,14 +250,28 @@ function mapDoc(astDoc: any): ViewerDoc {
     const page = { id: slug(p.name || p.id), name: p.name || p.id, frames: [] as ViewerFrame[] };
     for (const f of p.frames || []) {
       const frame: ViewerFrame = { id: f.id, name: f.name, w: f.w || 0, h: f.h || 0, style: f.style, children: [] };
-      for (const n of f.children || []) {
-        if (!["rect", "text", "image"].includes(n.kind)) continue;
-        frame.children.push({
+      const mapNode = (n: any): ViewerNode => {
+        const mapped: ViewerNode = {
           kind: n.kind, id: n.id, x: n.x, y: n.y, w: n.w, h: n.h,
           text: n.text, src: n.src,
           style: { fill: n.style?.fill, stroke: n.style?.stroke, strokeWidth: n.style?.strokeWidth, corner: n.style?.corner, text: n.style?.text },
           place: n.place as PlacementRule[] | undefined,
-        });
+        };
+        if (n.kind === "flex") {
+          mapped.direction = n.direction || "column";
+          mapped.gap = n.gap || 0;
+          mapped.align = n.align;
+          mapped.justify = n.justify;
+          mapped.padding = n.padding || 0;
+        }
+        if (n.children) {
+          mapped.children = n.children.map(mapNode);
+        }
+        return mapped;
+      };
+      
+      for (const n of f.children || []) {
+        frame.children.push(mapNode(n));
       }
       page.frames.push(frame);
     }
@@ -230,52 +283,110 @@ function mapDoc(astDoc: any): ViewerDoc {
 // ---- Tiny layout engine for placement rules ----
 function layoutDoc(doc: ViewerDoc): ViewerDoc {
   const next: ViewerDoc = JSON.parse(JSON.stringify(doc));
-  for (const page of next.pages) for (const frame of page.frames) {
-    const idx: Record<string, ViewerNode> = {};
-    for (const node of frame.children) {
-      if (node.kind === "text") {
-        const size = node.style?.text?.size ?? 14;
-        node.w = node.w ?? Math.max(80, (node.text?.length || 1) * (size * 0.6) + 16);
-        node.h = node.h ?? (size * 1.6);
-      } else if (node.kind === "image") {
-        node.w = node.w ?? 64; node.h = node.h ?? 64;
-      } else if (node.kind === "rect") {
-        node.w = node.w ?? 100; node.h = node.h ?? 40;
+
+  const resolvePlace = (node: ViewerNode, siblings: ViewerNode[], parentW: number, parentH: number, parentX: number = 0, parentY: number = 0) => {
+    const idx = Object.fromEntries(siblings.map(n => [n.id, n]));
+    if (!node.place) return;
+    for (const r of node.place) {
+      if (r.type === "centered") {
+        const ref = r.ref ? idx[r.ref] : undefined;
+        const bx = ref ? (ref.x || 0) : parentX, by = ref ? (ref.y || 0) : parentY;
+        const bw = ref ? (Number(ref.w) || parentW) : parentW, bh = ref ? (Number(ref.h) || parentH) : parentH;
+        node.x = bx + (bw - (Number(node.w) || 0)) / 2; node.y = by + (bh - (Number(node.h) || 0)) / 2; continue;
       }
-      idx[node.id] = node;
+      if (r.type === "centerX") { const ref = r.ref ? idx[r.ref] : undefined; const bx = ref ? (ref.x || 0) : parentX; const bw = ref ? (Number(ref.w) || parentW) : parentW; node.x = bx + (bw - (Number(node.w) || 0)) / 2; continue; }
+      if (r.type === "centerY") { const ref = r.ref ? idx[r.ref] : undefined; const by = ref ? (ref.y || 0) : parentY; const bh = ref ? (Number(ref.h) || parentH) : parentH; node.y = by + (bh - (Number(node.h) || 0)) / 2; continue; }
+      if (r.type === "below")  { const ref = idx[r.ref]; if (ref) node.y = (ref.y || 0) + (Number(ref.h) || 0) + (r.by || 0); continue; }
+      if (r.type === "above")  { const ref = idx[r.ref]; if (ref) node.y = (ref.y || 0) - (Number(node.h) || 0) - (r.by || 0); continue; }
+      if (r.type === "rightOf"){ const ref = idx[r.ref]; if (ref) node.x = (ref.x || 0) + (Number(ref.w) || 0) + (r.by || 0); continue; }
+      if (r.type === "leftOf") { const ref = idx[r.ref]; if (ref) node.x = (ref.x || 0) - (Number(node.w) || 0) - (r.by || 0); continue; }
+      if (r.type === "inside") {
+        const ref = idx[r.ref];
+        const inset = r.inset;
+        const t = Array.isArray(inset) ? inset : inset !== undefined ? [inset, inset, inset, inset] : [0,0,0,0];
+        const bx = ref ? (ref.x || 0) : parentX, by = ref ? (ref.y || 0) : parentY;
+        const bw = ref ? (Number(ref.w) || parentW) : parentW, bh = ref ? (Number(ref.h) || parentH) : parentH;
+        node.x = Math.max(bx + t[3], Math.min((node.x ?? bx + t[3]), bx + bw - (Number(node.w) || 0) - t[1]));
+        node.y = Math.max(by + t[0], Math.min((node.y ?? by + t[0]), by + bh - (Number(node.h) || 0) - t[2]));
+        continue;
+      }
+      if (r.type === "alignLeft")   { const ref = idx[r.ref]; if (ref) node.x = (ref.x || 0); continue; }
+      if (r.type === "alignRight")  { const ref = idx[r.ref]; if (ref) node.x = (ref.x || 0) + (Number(ref.w) || 0) - (Number(node.w) || 0); continue; }
+      if (r.type === "alignTop")    { const ref = idx[r.ref]; if (ref) node.y = (ref.y || 0); continue; }
+      if (r.type === "alignBottom") { const ref = idx[r.ref]; if (ref) node.y = (ref.y || 0) + (Number(ref.h) || 0) - (Number(node.h) || 0); continue; }
     }
-    for (const node of frame.children) {
-      if (!node.place) continue;
-      for (const r of node.place) {
-        if (r.type === "centered") {
-          const ref = r.ref ? idx[r.ref] : undefined;
-          const bx = ref ? (ref.x || 0) : 0, by = ref ? (ref.y || 0) : 0;
-          const bw = ref ? (ref.w || frame.w) : frame.w, bh = ref ? (ref.h || frame.h) : frame.h;
-          node.x = bx + (bw - (node.w || 0)) / 2; node.y = by + (bh - (node.h || 0)) / 2; continue;
+  };
+
+  const layoutNode = (node: ViewerNode, siblings: ViewerNode[], parentX: number, parentY: number, parentW: number, parentH: number) => {
+    // 1. Initial Sizing
+    if (node.kind === "text") {
+      const size = node.style?.text?.size ?? 14;
+      node.w = node.w ?? Math.max(80, (node.text?.length || 1) * (size * 0.6) + 16);
+      node.h = node.h ?? (size * 1.6);
+    } else if (node.kind === "image") {
+      node.w = node.w ?? 64; node.h = node.h ?? 64;
+    } else if (node.kind === "rect" || node.kind === "flex") {
+      if (node.w === "fill") node.w = parentW;
+      if (node.h === "fill") node.h = parentH;
+      node.w = node.w ?? (node.kind === "flex" ? parentW : 100); 
+      node.h = node.h ?? (node.kind === "flex" ? "hug" : 40);
+    }
+
+    // 2. Resolve absolute placement rules if any
+    resolvePlace(node, siblings, parentW, parentH, parentX, parentY);
+
+    if (node.x === undefined) node.x = parentX + 16;
+    if (node.y === undefined) node.y = parentY + 16;
+
+    // 3. Layout Children
+    if (node.children) {
+      if (node.kind === "flex") {
+        const isCol = node.direction !== "row";
+        const gap = node.gap || 0;
+        const pad = node.padding || 0;
+        let cx = node.x + pad;
+        let cy = node.y + pad;
+        let maxChildW = 0;
+        let maxChildH = 0;
+
+        for (const child of node.children) {
+          // Pre-assign coordinates so absolute children have an anchor
+          if (!child.place || child.place.length === 0) {
+             child.x = cx;
+             child.y = cy;
+          }
+
+          layoutNode(child, node.children, child.x ?? cx, child.y ?? cy, Number(node.w) - pad * 2, Number(node.h) === Number.NaN ? parentH : Number(node.h));
+          
+          // Simple stacking logic (main axis)
+          if (!child.place || child.place.length === 0) {
+             if (isCol) {
+               cy += (Number(child.h) || 0) + gap;
+             } else {
+               cx += (Number(child.w) || 0) + gap;
+             }
+          }
+          maxChildW = Math.max(maxChildW, (child.x - node.x) + (Number(child.w) || 0));
+          maxChildH = Math.max(maxChildH, (child.y - node.y) + (Number(child.h) || 0));
         }
-        if (r.type === "centerX") { const ref = r.ref ? idx[r.ref] : undefined; const bx = ref ? (ref.x || 0) : 0; const bw = ref ? (ref.w || frame.w) : frame.w; node.x = bx + (bw - (node.w || 0)) / 2; continue; }
-        if (r.type === "centerY") { const ref = r.ref ? idx[r.ref] : undefined; const by = ref ? (ref.y || 0) : 0; const bh = ref ? (ref.h || frame.h) : frame.h; node.y = by + (bh - (node.h || 0)) / 2; continue; }
-        if (r.type === "below")  { const ref = idx[r.ref]; if (ref) node.y = (ref.y || 0) + (ref.h || 0) + (r.by || 0); continue; }
-        if (r.type === "above")  { const ref = idx[r.ref]; if (ref) node.y = (ref.y || 0) - (node.h || 0) - (r.by || 0); continue; }
-        if (r.type === "rightOf"){ const ref = idx[r.ref]; if (ref) node.x = (ref.x || 0) + (ref.w || 0) + (r.by || 0); continue; }
-        if (r.type === "leftOf") { const ref = idx[r.ref]; if (ref) node.x = (ref.x || 0) - (node.w || 0) - (r.by || 0); continue; }
-        if (r.type === "inside") {
-          const ref = idx[r.ref];
-          const inset = r.inset;
-          const t = Array.isArray(inset) ? inset : inset !== undefined ? [inset, inset, inset, inset] : [0,0,0,0];
-          const bx = ref ? (ref.x || 0) : 0, by = ref ? (ref.y || 0) : 0;
-          const bw = ref ? (ref.w || frame.w) : frame.w, bh = ref ? (ref.h || frame.h) : frame.h;
-          node.x = Math.max(bx + t[3], Math.min((node.x ?? bx + t[3]), bx + bw - (node.w || 0) - t[1]));
-          node.y = Math.max(by + t[0], Math.min((node.y ?? by + t[0]), by + bh - (node.h || 0) - t[2]));
-          continue;
+
+        // Hug content sizing
+        if (node.w === "hug" || node.w === undefined) node.w = maxChildW + pad;
+        if (node.h === "hug" || node.h === undefined) node.h = maxChildH + pad;
+      } else {
+        // Layout absolute children for non-flex nodes
+        for (const child of node.children) {
+          layoutNode(child, node.children, node.x, node.y, Number(node.w), Number(node.h));
         }
-        if (r.type === "alignLeft")   { const ref = idx[r.ref]; if (ref) node.x = (ref.x || 0); continue; }
-        if (r.type === "alignRight")  { const ref = idx[r.ref]; if (ref) node.x = (ref.x || 0) + (ref.w || 0) - (node.w || 0); continue; }
-        if (r.type === "alignTop")    { const ref = idx[r.ref]; if (ref) node.y = (ref.y || 0); continue; }
-        if (r.type === "alignBottom") { const ref = idx[r.ref]; if (ref) node.y = (ref.y || 0) + (ref.h || 0) - (node.h || 0); continue; }
       }
-      if (node.x === undefined) node.x = 16;
-      if (node.y === undefined) node.y = 16;
+    }
+  };
+
+  for (const page of next.pages) {
+    for (const frame of page.frames) {
+      for (const node of frame.children) {
+        layoutNode(node, frame.children, 0, 0, frame.w, frame.h);
+      }
     }
   }
   return next;

@@ -98,4 +98,46 @@ page P:
     const { errors } = parseWFML(src);
     expect(errors.length).toBeGreaterThan(0);
   });
+
+  it('parses dynamic plugins and flex layouts', () => {
+    const src = `
+page P:
+  frame flexboard:
+    w: 500
+    h: 500
+    flex form:
+      direction: column
+      gap: 16
+      padding: 24
+      w: fill
+      h: hug
+      
+      youtube-player vid:
+        w: fill
+        h: 200
+        video_id: "dQw4w9WgXcQ"
+        
+      text title:
+        text: "Submit"
+`;
+    const { doc, errors } = parseWFML(src);
+    expect(errors).toHaveLength(0);
+
+    const frame = doc.pages[0].frames[0];
+    const form = (frame.children || []).find((n: any) => n.id === 'form') as any;
+    expect(form).toBeTruthy();
+    expect(form.kind).toBe('flex');
+    expect(form.direction).toBe('column');
+    expect(form.gap).toBe(16);
+    expect(form.padding).toBe(24);
+    expect(form.w).toBe('fill');
+    expect(form.h).toBe('hug');
+
+    const vid = (form.children || []).find((n: any) => n.id === 'vid') as any;
+    expect(vid).toBeTruthy();
+    expect(vid.kind).toBe('youtube-player');
+    expect(vid.w).toBe('fill');
+    expect(vid.h).toBe(200);
+    expect(vid.video_id).toBe('dQw4w9WgXcQ');
+  });
 });

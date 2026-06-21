@@ -37,16 +37,17 @@ export interface Page extends NodeTrivia { id: string; name: string; frames: Fra
 
 export interface Frame extends NodeBase { kind: "frame"; w: number; h: number; name?: string; children: Node[] }
 
-export type Node =
-  | Rect | Ellipse | Diamond | TextNode | Icon | ImageNode
-  | Arrow | Line | Polyline | Sticky | Freehand
-  | Group | Instance;
+export interface Node extends NodeBase {
+  kind: string;
+  [key: string]: any; // Allow arbitrary plugin properties
+}
 
 export interface NodeBase extends NodeTrivia {
   id: string; name?: string; z?: number; lock?: boolean; hidden?: boolean; opacity?: number;
-  x?: number; y?: number; w?: number; h?: number; rotation?: number;
+  x?: number; y?: number; w?: number | "fill" | "hug" | "auto"; h?: number | "fill" | "hug" | "auto"; rotation?: number;
   place?: PlacementRule[]; tags?: string[]; extra?: Record<string, any>;
   style?: Style;
+  children?: Node[]; // Adding children here since many plugins/flex will need it
 }
 
 export interface Style {
@@ -320,7 +321,7 @@ function parseNodesLike(C: ParseContext, indent: number, out: Node[]) {
     if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
     if (tok.indent !== indent) break;
 
-    const m = tok.text.match(/^(use|group|rect|ellipse|diamond|text|icon|image|arrow|line|polyline|sticky|freehand)\s+([^:]+):\s*$/);
+    const m = tok.text.match(/^([\w-]+)\s+([^:]+):\s*$/);
     if (!m) { C.errors.push({ line: tok.lineNo, column: 1, message: "Expected a node header like 'rect id:'" }); C.i++; continue; }
 
     const kind = m[1];
@@ -336,12 +337,12 @@ function parseNodesLike(C: ParseContext, indent: number, out: Node[]) {
       const [compName, instId] = splitFirst(id, /\s+/);
       const inst: Instance = { kind: "instance", id: slugify(instId || compName), of: compName.trim() } as any;
       attachComments(inst, C);
-      parseNodeBlock(C, indent + 1, inst, false);
+      parseNodeBlock(C, indent + 1, inst, true);
       out.push(inst);
     } else {
       const node: any = { kind, id: slugify(id) };
       attachComments(node, C);
-      parseNodeBlock(C, indent + 1, node, false);
+      parseNodeBlock(C, indent + 1, node, true);
       out.push(node as Node);
     }
   }
@@ -355,7 +356,7 @@ function parseNodeBlock(C: ParseContext, indent: number, node: any, canHaveChild
     if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
     if (tok.indent !== indent) break;
 
-    if (canHaveChildren && /^(use|group|rect|ellipse|diamond|text|icon|image|arrow|line|polyline|sticky|freehand)\s+/.test(tok.text)) {
+    if (canHaveChildren && /^([\w-]+)\s+[^:]+:\s*$/.test(tok.text)) {
       if (!node.children) node.children = [];
       parseNodesLike(C, indent, node.children);
       continue;
@@ -402,7 +403,7 @@ function assignNodeKey(node: any, key: string, value: any, line: number, C: Pars
 
   if (key.includes(".")) { setDeep(node, key, value); return; }
 
-  node.extra = node.extra || {}; node.extra[key] = value;
+  node[key] = value;
 }
 
 // -----------------------------
