@@ -27,6 +27,15 @@ export type ViewerNode = {
 
 export type ViewerDoc = { children: ViewerNode[] };
 
+export type SceneBounds = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+};
+
 export function findNodeById(nodes: ViewerNode[], id: string | null): ViewerNode | null {
   if (!id) return null;
   for (const node of nodes) {
@@ -35,6 +44,40 @@ export function findNodeById(nodes: ViewerNode[], id: string | null): ViewerNode
     if (child) return child;
   }
   return null;
+}
+
+export function getSceneBounds(nodes: ViewerNode[]): SceneBounds | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const visit = (list: ViewerNode[]) => {
+    for (const node of list) {
+      const x = Number(node.x ?? 0);
+      const y = Number(node.y ?? 0);
+      const w = Number(node.w ?? 0);
+      const h = Number(node.h ?? 0);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + w);
+      maxY = Math.max(maxY, y + h);
+      if (node.children?.length) visit(node.children);
+    }
+  };
+
+  if (!nodes.length) return null;
+  visit(nodes);
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
 }
 
 export function mapDoc(astDoc: any): ViewerDoc {

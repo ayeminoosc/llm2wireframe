@@ -28,12 +28,20 @@ export function PropertyInspectorPanel({ selectedNode, definition, onChangePrope
             return (
               <label key={property.key} style={styles.field}>
                 <span style={styles.label}>{property.label}</span>
-                <input
-                  type={property.type === "number" ? "number" : property.type === "color" ? "color" : "text"}
-                  value={property.type === "color" ? String(value ?? "#000000") : String(value ?? "")}
-                  onChange={(e) => onChangeProperty(property, e.target.value)}
-                  style={styles.input}
-                />
+                {property.type === "select" ? (
+                  <select value={String(value ?? "")} onChange={(e) => onChangeProperty(property, e.target.value)} style={styles.input}>
+                    {(property.options || []).map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={property.type === "number" ? "number" : property.type === "color" ? "color" : "text"}
+                    value={property.type === "color" ? String(value ?? "#000000") : String(value ?? "")}
+                    onChange={(e) => onChangeProperty(property, e.target.value)}
+                    style={styles.input}
+                  />
+                )}
               </label>
             );
           })}

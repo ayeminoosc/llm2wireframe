@@ -7,6 +7,7 @@ export type NodePropertyDefinition = {
   key: string;
   label: string;
   type: "text" | "number" | "color" | "select";
+  options?: { label: string; value: string }[];
 };
 
 export type NodeToolDefinition = {

@@ -4,9 +4,10 @@ import type { NodeDefinition } from "../../engine/registry";
 type Props = {
   tools: NodeDefinition[];
   onInsert: (kind: string) => void;
+  actions?: { key: string; label: string; disabled?: boolean; onClick: () => void }[];
 };
 
-export function Toolbar({ tools, onInsert }: Props) {
+export function Toolbar({ tools, onInsert, actions = [] }: Props) {
   return (
     <div style={styles.toolbar}>
       {tools.map((tool) => (
@@ -16,6 +17,12 @@ export function Toolbar({ tools, onInsert }: Props) {
             {tool.tool?.icon} {tool.tool?.label}
           </button>
         </React.Fragment>
+      ))}
+      {actions.length ? <div style={styles.separator} /> : null}
+      {actions.map((action) => (
+        <button key={action.key} style={{ ...styles.toolBtn, opacity: action.disabled ? 0.5 : 1 }} onClick={action.onClick} disabled={action.disabled}>
+          {action.label}
+        </button>
       ))}
     </div>
   );

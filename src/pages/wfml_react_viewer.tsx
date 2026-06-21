@@ -1,18 +1,22 @@
 // src/components/WFMLReactViewerInline.tsx
 import React, { useEffect, useMemo, useState, useRef } from "react";
 
-import { applyDragToSource, applyDragToView, insertRootNodeIntoSource, updateNodePropertyInSource } from "../engine/commands";
-import { getViewportCenterWorldPoint, panCamera, scrollCamera, zoomCameraAtPoint, type Camera } from "../engine/camera";
+import { applyDragToView, copyNodeFromSource, deleteNodeFromSource, duplicateNodeInSource, insertRootNodeIntoSource, pasteNodeIntoSource, resolveDragToSource, updateNodePropertyInSource } from "../engine/commands";
+import { createDefaultCamera, fitCameraToBounds, getViewportCenterWorldPoint, panCamera, scrollCamera, zoomCameraAtPoint, type Camera } from "../engine/camera";
 import { layoutDoc } from "../engine/layout";
 import { createNodeFromRegistry, createNodeRegistry, getToolDefinitions, type NodePropertyDefinition } from "../engine/registry";
-import { findNodeById, mapDoc, type ViewerDoc, type ViewerNode } from "../engine/scene";
+import { findNodeById, getSceneBounds, mapDoc, type ViewerDoc, type ViewerNode } from "../engine/scene";
 import { parseWFML } from "../parser/wfml-grammar-parser-emitter";
 import { primitiveNodeDefinitions } from "../core-library/primitives";
 import { CanvasShell } from "../studio/components/CanvasShell";
 import { NodeWrapper } from "../studio/components/NodeWrapper";
 import { Toolbar } from "../studio/components/Toolbar";
+import { useDocumentHistory } from "../studio/hooks/useDocumentHistory";
 import { CodeEditorPanel } from "../studio/panels/CodeEditorPanel";
 import { PropertyInspectorPanel } from "../studio/panels/PropertyInspectorPanel";
+
+const STORAGE_KEY = "llm2wireframe.wfml";
+const CAMERA_STORAGE_KEY = "llm2wireframe.camera";
 
 export default function WFMLReactViewerInline({
   initialText,
@@ -87,7 +91,7 @@ frame iPhone13:
           place: centered in #loginbtn
 `;
 
-  const [src, setSrc] = useState(SAMPLE);
+  const { src, setDocument, replaceDocument, undo, redo, canUndo, canRedo } = useDocumentHistory(SAMPLE);
   const [parseErrors, setParseErrors] = useState<any[]>([]);
   const parsed = useMemo(() => parseWFML(src), [src]);
   const [view, setView] = useState<ViewerDoc | null>(null);
@@ -98,16 +102,119 @@ frame iPhone13:
   const [draggingId, setDraggingId] = useState<string | null>(null);
   
   // Camera State
-  const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, z: 1 });
+  const [camera, setCamera] = useState<Camera>(createDefaultCamera());
   const [isPanning, setIsPanning] = useState(false);
+  const clipboardRef = useRef<any | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const registry = useMemo(() => createNodeRegistry(primitiveNodeDefinitions), []);
   const toolbarTools = useMemo(() => getToolDefinitions(registry), [registry]);
   const selectedNode = useMemo(() => (view ? findNodeById(view.children, selectedId) : null), [view, selectedId]);
   const selectedDefinition = useMemo(() => (selectedNode ? registry.get(selectedNode.kind) : undefined), [registry, selectedNode]);
+  const hasParseErrors = parseErrors.length > 0;
 
   const nodeRefs = useRef<Record<string, SVGGElement | null>>({});
   const dragStartPos = useRef({ x: 0, y: 0 });
   const currentDelta = useRef({ x: 0, y: 0 });
+
+  const zoomPercent = Math.round(camera.z * 100);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!initialText) {
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      if (stored) replaceDocument(stored);
+    }
+    const storedCamera = window.localStorage.getItem(CAMERA_STORAGE_KEY);
+    if (storedCamera) {
+      try {
+        setCamera(JSON.parse(storedCamera));
+      } catch {}
+    }
+  }, [initialText, replaceDocument]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEY, src);
+  }, [src]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(CAMERA_STORAGE_KEY, JSON.stringify(camera));
+  }, [camera]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTextInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (isTextInput) return;
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+        return;
+      }
+      if (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") || ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z")) {
+        event.preventDefault();
+        redo();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "e") {
+        event.preventDefault();
+        setShowCode((open) => !open);
+        return;
+      }
+      if (selectedId && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        if (hasParseErrors || !view) return;
+        event.preventDefault();
+        const step = event.shiftKey ? 10 : 1;
+        const dx = event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0;
+        const dy = event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0;
+        setDocument((prev) => resolveDragToSource(prev, view, selectedId, dx, dy));
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSelectedId(null);
+        setDraggingId(null);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && selectedId) {
+        if (hasParseErrors) return;
+        event.preventDefault();
+        clipboardRef.current = copyNodeFromSource(src, selectedId);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v" && clipboardRef.current) {
+        if (hasParseErrors) return;
+        event.preventDefault();
+        setDocument((prev) => {
+          const result = pasteNodeIntoSource(prev, clipboardRef.current);
+          if (result.pastedId) setSelectedId(result.pastedId);
+          return result.src;
+        });
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d" && selectedId) {
+        if (hasParseErrors) return;
+        event.preventDefault();
+        setDocument((prev) => {
+          const result = duplicateNodeInSource(prev, selectedId);
+          if (result.duplicatedId) setSelectedId(result.duplicatedId);
+          return result.src;
+        });
+        return;
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
+        if (hasParseErrors) return;
+        event.preventDefault();
+        setDocument((prev) => deleteNodeFromSource(prev, selectedId));
+        setSelectedId(null);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [hasParseErrors, redo, selectedId, setDocument, src, undo, view]);
 
   useEffect(() => {
     const { doc, errors } = parsed as any;
@@ -116,11 +223,65 @@ frame iPhone13:
     setView(layoutDoc(mapDoc(doc)));
   }, [parsed]);
 
+  useEffect(() => {
+    if (selectedId && !selectedNode) {
+      setSelectedId(null);
+      setDraggingId(null);
+    }
+  }, [selectedId, selectedNode]);
+
   const rebuild = () => {
     const { doc, errors } = parseWFML(src) as any;
     setParseErrors(errors || []);
     if (!doc) return;
     setView(layoutDoc(mapDoc(doc)));
+  };
+
+  const fitViewToScene = () => {
+    if (!view || typeof window === "undefined") return;
+    const bounds = getSceneBounds(view.children);
+    if (!bounds) {
+      setCamera(createDefaultCamera());
+      return;
+    }
+    setCamera(fitCameraToBounds(bounds, window.innerWidth, window.innerHeight));
+  };
+
+  const zoomBy = (factor: number) => {
+    if (typeof window === "undefined") return;
+    setCamera((c) => zoomCameraAtPoint(c, window.innerWidth / 2, window.innerHeight / 2, factor));
+  };
+
+  const handleDownloadWFML = () => {
+    if (typeof window === "undefined") return;
+    const blob = new Blob([src], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "wireframe.wfml";
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleImportWFML = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setSelectedId(null);
+    setDraggingId(null);
+    clipboardRef.current = null;
+    setCamera(createDefaultCamera());
+    setDocument(text);
+    event.target.value = "";
+  };
+
+  const focusSelectedNode = () => {
+    if (!selectedNode || typeof window === "undefined") return;
+    const x = Number(selectedNode.x ?? 0);
+    const y = Number(selectedNode.y ?? 0);
+    const w = Math.max(1, Number(selectedNode.w ?? 1));
+    const h = Math.max(1, Number(selectedNode.h ?? 1));
+    setCamera(fitCameraToBounds({ minX: x, minY: y, width: w, height: h }, window.innerWidth, window.innerHeight, 120));
   };
 
   const handlePointerDownCanvas = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -172,8 +333,8 @@ frame iPhone13:
     }
     
     if (dx !== 0 || dy !== 0) {
-      setView(applyDragToView(view, idToUpdate, dx, dy));
-      setSrc((prev) => applyDragToSource(prev, idToUpdate, dx, dy));
+      if (hasParseErrors) return;
+      setDocument((prev) => resolveDragToSource(prev, view, idToUpdate, dx, dy));
     }
   };
 
@@ -201,20 +362,22 @@ frame iPhone13:
   };
 
   const handleInsertNode = (kind: string) => {
+    if (hasParseErrors) return;
     try {
       const id = `${kind}-${Math.floor(Math.random() * 10000)}`;
       const world = getViewportCenterWorldPoint(camera, window.innerWidth, window.innerHeight);
       const newNode = createNodeFromRegistry(registry, kind, id, Math.round(world.x), Math.round(world.y));
-      setSrc((prev) => insertRootNodeIntoSource(prev, newNode));
+      setDocument((prev) => insertRootNodeIntoSource(prev, newNode));
     } catch (e) {
       console.error("Failed to insert node", e);
     }
   };
 
   const handlePropertyChange = (property: NodePropertyDefinition, rawValue: string) => {
+    if (hasParseErrors) return;
     if (!selectedId) return;
     const value = property.type === "number" ? (rawValue === "" ? 0 : Number(rawValue)) : rawValue;
-    setSrc((prev) => updateNodePropertyInSource(prev, selectedId, property.key, value));
+    setDocument((prev) => updateNodePropertyInSource(prev, selectedId, property.key, value));
   };
 
   const renderNode = (n: ViewerNode): React.ReactNode => {
@@ -264,11 +427,77 @@ frame iPhone13:
       position: "absolute", top: 24, right: 24, zIndex: 10,
       padding: "8px 16px", borderRadius: 8, border: "none", background: "#2B59FF", color: "#fff", cursor: "pointer", fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
     },
+    statusBar: {
+      position: "absolute",
+      left: 24,
+      right: 24,
+      bottom: 16,
+      display: "flex",
+      gap: 16,
+      alignItems: "center",
+      flexWrap: "wrap",
+      padding: "10px 14px",
+      borderRadius: 10,
+      background: "rgba(255,255,255,0.92)",
+      border: "1px solid #e2e8f0",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+      color: "#475569",
+      fontSize: 12,
+      zIndex: 10,
+      backdropFilter: "blur(6px)",
+    },
   };
 
   return (
     <div style={styles.wrap}>
-      <Toolbar tools={toolbarTools} onInsert={handleInsertNode} />
+      <Toolbar
+        tools={toolbarTools}
+        onInsert={handleInsertNode}
+        actions={[
+          { key: "undo", label: "Undo", disabled: !canUndo, onClick: undo },
+          { key: "redo", label: "Redo", disabled: !canRedo, onClick: redo },
+          { key: "zoom-out", label: "Zoom -", onClick: () => zoomBy(0.9) },
+          { key: "zoom-in", label: "Zoom +", onClick: () => zoomBy(1.1) },
+          { key: "copy", label: "Copy", disabled: !selectedId || hasParseErrors, onClick: () => {
+            if (!selectedId) return;
+            clipboardRef.current = copyNodeFromSource(src, selectedId);
+          } },
+          { key: "paste", label: "Paste", disabled: !clipboardRef.current || hasParseErrors, onClick: () => {
+            if (!clipboardRef.current) return;
+            setDocument((prev) => {
+              const result = pasteNodeIntoSource(prev, clipboardRef.current);
+              if (result.pastedId) setSelectedId(result.pastedId);
+              return result.src;
+            });
+          } },
+          { key: "duplicate", label: "Duplicate", disabled: !selectedId || hasParseErrors, onClick: () => {
+            if (!selectedId) return;
+            setDocument((prev) => {
+              const result = duplicateNodeInSource(prev, selectedId);
+              if (result.duplicatedId) setSelectedId(result.duplicatedId);
+              return result.src;
+            });
+          } },
+          { key: "delete", label: "Delete", disabled: !selectedId || hasParseErrors, onClick: () => {
+            if (!selectedId) return;
+            setDocument((prev) => deleteNodeFromSource(prev, selectedId));
+            setSelectedId(null);
+          } },
+          { key: "focus-selected", label: "Focus Selected", disabled: !selectedNode, onClick: focusSelectedNode },
+          { key: "reset-view", label: "Reset View", onClick: () => setCamera(createDefaultCamera()) },
+          { key: "fit-view", label: "Fit View", disabled: !view, onClick: fitViewToScene },
+          { key: "import", label: "Import", onClick: () => fileInputRef.current?.click() },
+          { key: "export", label: "Export", onClick: handleDownloadWFML },
+          { key: "new", label: "New", onClick: () => {
+            setSelectedId(null);
+            setDraggingId(null);
+            clipboardRef.current = null;
+            setCamera(createDefaultCamera());
+            setDocument(SAMPLE);
+          } },
+          { key: "code", label: showCode ? "Hide Code" : "Show Code", onClick: () => setShowCode((open) => !open) },
+        ]}
+      />
 
       {/* Floating Action Button for Code */}
       {!showCode && (
@@ -277,9 +506,11 @@ frame iPhone13:
         </button>
       )}
 
+      <input ref={fileInputRef} type="file" accept=".wfml,.txt,text/plain" style={{ display: "none" }} onChange={handleImportWFML} />
+
       <PropertyInspectorPanel selectedNode={selectedNode} definition={selectedDefinition} onChangeProperty={handlePropertyChange} />
 
-      <CodeEditorPanel open={showCode} src={src} errors={parseErrors} onChangeSrc={setSrc} onClose={() => setShowCode(false)} onRebuild={rebuild} />
+      <CodeEditorPanel open={showCode} src={src} errors={parseErrors} onChangeSrc={setDocument} onClose={() => setShowCode(false)} onRebuild={rebuild} />
 
       {!view ? (
         <div style={{ color: "#64748b" }}>No parse result.</div>
@@ -288,6 +519,13 @@ frame iPhone13:
           {view.children.map(renderNode)}
         </CanvasShell>
       )}
+
+      <div style={styles.statusBar}>
+        <span>Zoom {zoomPercent}%</span>
+        <span>{selectedId ? `Selected #${selectedId}` : "No selection"}</span>
+        <span>{hasParseErrors ? `${parseErrors.length} parse error(s)` : "WFML valid"}</span>
+        <span>Shortcuts: Cmd/Ctrl+Z, D, C, V, E</span>
+      </div>
     </div>
   );
 }
