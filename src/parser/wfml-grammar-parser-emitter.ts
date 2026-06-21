@@ -18,7 +18,7 @@ export interface WFDocument {
   meta: { version?: string; author?: string; seed?: number; [k: string]: any } & NodeTrivia;
   assets: Asset[];
   components: Component[];
-  pages: Page[];
+  children: Node[];
 }
 
 export interface NodeTrivia { comments?: string[] }
@@ -134,7 +134,7 @@ export function parseWFML(src: string): ParseResult {
   const lines = lexLines(src);
   const C: ParseContext = { i: 0, lines, errors: [], warnings: [], pendingComments: [] };
 
-  const doc: WFDocument = { type: "wfdoc", meta: {}, assets: [], components: [], pages: [] };
+  const doc: WFDocument = { type: "wfdoc", meta: {}, assets: [], components: [], children: [] };
 
   // Consume file-level comments
   while (peek(C) && (peek(C)!.isComment || peek(C)!.isBlank)) {
@@ -169,18 +169,13 @@ export function parseWFML(src: string): ParseResult {
       continue;
     }
 
-    const pageHdr = matchHeader(tok, 0, /^page\s+([^:]+):\s*$/);
-    if (pageHdr) {
+    // Try parsing as a root node
+    const lenBefore = C.i;
+    parseNodesLike(C, 0, doc.children);
+    if (C.i === lenBefore) {
+      C.errors.push({ line: tok.lineNo, column: 1, message: `Unexpected top-level line: "${tok.text}"` });
       C.i++;
-      const page: Page = { id: slugify(pageHdr[1]), name: pageHdr[1].trim(), frames: [] };
-      attachComments(page, C);
-      parsePage(C, 1, page);
-      doc.pages.push(page);
-      continue;
     }
-
-    C.errors.push({ line: tok.lineNo, column: 1, message: `Unexpected top-level line: "${tok.text}"` });
-    C.i++;
   }
 
   return { doc, errors: C.errors, warnings: C.warnings };
@@ -543,23 +538,13 @@ export function emitWFML(doc: WFDocument, opts: EmitOptions = {}): string {
     b.push("");
   }
 
-  for (const p of doc.pages) {
-    pushComments(p.comments);
-    b.push(`page ${p.name}:`);
-    for (const f of p.frames) emitFrame(b, f, 1, IND);
+  if (Array.isArray(doc.children)) {
+    for (const n of doc.children) {
+      emitNode(b, n, 0, IND);
+    }
   }
 
   return b.join("\n").replace(/\n{3,}/g, "\n\n");
-}
-
-function emitFrame(b: string[], f: Frame, level: number, IND: string) {
-  pushIf(b, f.comments, level);
-  b.push(IND.repeat(level) + `frame ${f.name || f.id}:`);
-  const kv: any = { w: f.w, h: f.h, name: f.name, x: f.x, y: f.y, rotation: f.rotation, opacity: f.opacity };
-  emitKV(b, kv, level + 1, IND);
-  emitStyle(b, f.style, level + 1, IND);
-  emitPlace(b, f.place, level + 1, IND);
-  if (Array.isArray(f.children)) for (const n of f.children) emitNode(b, n, level + 1, IND);
 }
 
 function emitNode(b: string[], n: Node | Group | Instance, level: number, IND: string) {

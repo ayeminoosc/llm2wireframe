@@ -38,8 +38,7 @@ type ViewerNode = {
   children?: ViewerNode[];
 };
 
-type ViewerFrame = { id: string; name?: string; w: number; h: number; style?: any; children: ViewerNode[] };
-type ViewerDoc = { pages: { id: string; name: string; frames: ViewerFrame[] }[] };
+type ViewerDoc = { children: ViewerNode[] };
 
 export default function WFMLReactViewerInline({
   initialText,
@@ -49,70 +48,69 @@ export default function WFMLReactViewerInline({
   version: 0.1
   author: you
 
-page Auth:
-  frame iPhone13:
-    w: 390
-    h: 844
-    style:
-      fill: #F5F6FA
+frame iPhone13:
+  w: 390
+  h: 844
+  style:
+    fill: #F5F6FA
 
-    flex container:
+  flex container:
+    direction: column
+    gap: 24
+    padding: 32
+    align: center
+    w: fill
+    h: hug
+    place: centered in #iPhone13
+
+    image logo:
+      src: https://dummyimage.com/64x64/2b59ff/ffffff.png&text=U
+      w: 64
+      h: 64
+
+    text title:
+      text: "Welcome back"
+      style:
+        text:
+          size: 24
+          weight: 700
+
+    flex form:
       direction: column
-      gap: 24
-      padding: 32
-      align: center
+      gap: 16
       w: fill
       h: hug
-      place: centered in #iPhone13
 
-      image logo:
-        src: https://dummyimage.com/64x64/2b59ff/ffffff.png&text=U
-        w: 64
-        h: 64
-
-      text title:
-        text: "Welcome back"
-        style:
-          text:
-            size: 24
-            weight: 700
-
-      flex form:
-        direction: column
-        gap: 16
+      rect email:
         w: fill
-        h: hug
-
-        rect email:
-          w: fill
-          h: 44
-          style:
-            fill: #ffffff
-            stroke: #999
-            corner: 10
-            
-        rect password:
-          w: fill
-          h: 44
-          style:
-            fill: #ffffff
-            stroke: #999
-            corner: 10
-
-        rect loginbtn:
-          w: fill
-          h: 44
-          style:
-            fill: #2B59FF
-            corner: 10
+        h: 44
+        style:
+          fill: #ffffff
+          stroke: #999
+          corner: 10
           
-          text logintext:
-            text: "Sign in"
-            style:
-              text:
-                size: 16
-                weight: 600
-            place: centered in #loginbtn
+      rect password:
+        w: fill
+        h: 44
+        style:
+          fill: #ffffff
+          stroke: #999
+          corner: 10
+
+      rect loginbtn:
+        w: fill
+        h: 44
+        style:
+          fill: #2B59FF
+          corner: 10
+        
+        text logintext:
+          text: "Sign in"
+          style:
+            text:
+              size: 16
+              weight: 600
+          place: centered in #loginbtn
 `;
 
   const [src, setSrc] = useState(SAMPLE);
@@ -124,6 +122,11 @@ page Auth:
   const [showCode, setShowCode] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  
+  // Camera State
+  const [camera, setCamera] = useState({ x: 0, y: 0, z: 1 });
+  const [isPanning, setIsPanning] = useState(false);
+
   const nodeRefs = useRef<Record<string, SVGGElement | null>>({});
   const dragStartPos = useRef({ x: 0, y: 0 });
   const currentDelta = useRef({ x: 0, y: 0 });
@@ -142,53 +145,65 @@ page Auth:
     setView(layoutDoc(mapDoc(doc)));
   };
 
-  const handlePointerDown = (e: React.PointerEvent<SVGElement>, nodeId: string) => {
-    e.stopPropagation();
-    setSelectedId(nodeId);
-    setDraggingId(nodeId);
-    
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
-    currentDelta.current = { x: 0, y: 0 };
-    
-    (e.target as SVGElement).setPointerCapture(e.pointerId);
+  const handlePointerDownCanvas = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button === 1 || e.altKey || e.shiftKey) { // Middle click or Alt/Shift pan
+      setIsPanning(true);
+      dragStartPos.current = { x: e.clientX, y: e.clientY };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+    setSelectedId(null);
   };
 
-  const handlePointerMove = (e: React.PointerEvent<SVGElement>) => {
-    if (!draggingId) return;
+  const handlePointerMoveCanvas = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isPanning) {
+      const dx = e.clientX - dragStartPos.current.x;
+      const dy = e.clientY - dragStartPos.current.y;
+      dragStartPos.current = { x: e.clientX, y: e.clientY };
+      setCamera(c => ({ ...c, x: c.x + dx, y: c.y + dy }));
+      return;
+    }
     
-    const dx = e.clientX - dragStartPos.current.x;
-    const dy = e.clientY - dragStartPos.current.y;
+    if (!draggingId) return;
+    const dx = (e.clientX - dragStartPos.current.x) / camera.z;
+    const dy = (e.clientY - dragStartPos.current.y) / camera.z;
     currentDelta.current = { x: dx, y: dy };
     
-    // Fast DOM update without React state re-render
     const el = nodeRefs.current[draggingId];
-    if (el) {
-      el.setAttribute("transform", `translate(${dx}, ${dy})`);
-    }
+    if (el) el.setAttribute("transform", `translate(${dx}, ${dy})`);
   };
 
-  const handlePointerUp = (e: React.PointerEvent<SVGElement>) => {
+  const handlePointerUpCanvas = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isPanning) {
+      setIsPanning(false);
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      return;
+    }
+    
     if (!draggingId || !view) return;
-    (e.target as SVGElement).releasePointerCapture(e.pointerId);
     
     const dx = currentDelta.current.x;
     const dy = currentDelta.current.y;
     const idToUpdate = draggingId;
     
-    // Reset dragging state and clear DOM transform immediately
     setDraggingId(null);
     const el = nodeRefs.current[idToUpdate];
-    if (el) el.removeAttribute("transform");
+    if (el) {
+      el.removeAttribute("transform");
+      try { el.releasePointerCapture(e.pointerId); } catch {}
+    }
     
-    // Only if we actually moved do we commit the change to React state
     if (dx !== 0 || dy !== 0) {
       const newView = JSON.parse(JSON.stringify(view));
+      const shiftSubtree = (node: ViewerNode, shiftX: number, shiftY: number) => {
+        node.x = (node.x || 0) + shiftX;
+        node.y = (node.y || 0) + shiftY;
+        for (const child of node.children || []) shiftSubtree(child, shiftX, shiftY);
+      };
       const updateNodePos = (nodes: ViewerNode[]): boolean => {
         for (const n of nodes) {
           if (n.id === idToUpdate) {
-            n.x = (n.x || 0) + dx;
-            n.y = (n.y || 0) + dy;
-            // Strip place rules so it stays where dropped
+            shiftSubtree(n, dx, dy);
             n.place = []; 
             return true;
           }
@@ -197,15 +212,64 @@ page Auth:
         return false;
       };
 
-      for (const page of newView.pages) {
-        for (const frame of page.frames) {
-          if (updateNodePos(frame.children)) break;
-        }
-      }
+      updateNodePos(newView.children);
       setView(newView);
       
-      // TODO: Phase 2 - Trigger Inverse Layout Solver here and emitWFML
+      try {
+        const res = parseWFML(src) as any;
+        const doc = res.doc;
+        if (doc) {
+          const shiftSubtree = (node: any, shiftX: number, shiftY: number) => {
+            node.x = (node.x || 0) + shiftX;
+            node.y = (node.y || 0) + shiftY;
+            for (const child of node.children || []) shiftSubtree(child, shiftX, shiftY);
+          };
+          const updateAstNode = (nodes: any[]): boolean => {
+            for (const n of nodes) {
+              if (n.id === idToUpdate) {
+                shiftSubtree(n, Math.round(dx), Math.round(dy));
+                n.place = undefined;
+                return true;
+              }
+              if (n.children && updateAstNode(n.children)) return true;
+            }
+            return false;
+          }
+          if (updateAstNode(doc.children)) {
+            setSrc(emitWFML(doc));
+          }
+        }
+      } catch (e) {}
     }
+  };
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+      setCamera(c => {
+        // Zoom towards mouse pointer
+        const rect = e.currentTarget.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const newZ = c.z * zoomFactor;
+        const newX = mouseX - (mouseX - c.x) * zoomFactor;
+        const newY = mouseY - (mouseY - c.y) * zoomFactor;
+        return { x: newX, y: newY, z: newZ };
+      });
+    } else {
+      setCamera(c => ({ ...c, x: c.x - e.deltaX, y: c.y - e.deltaY }));
+    }
+  };
+
+  const handlePointerDownNode = (e: React.PointerEvent<SVGElement>, nodeId: string) => {
+    e.stopPropagation();
+    if (e.button === 1 || e.altKey || e.shiftKey) return; // Let canvas handle pan
+    setSelectedId(nodeId);
+    setDraggingId(nodeId);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    currentDelta.current = { x: 0, y: 0 };
   };
 
   const handleInsertNode = (kind: string) => {
@@ -213,34 +277,145 @@ page Auth:
       const res = parseWFML(src) as any;
       const doc = res.doc;
       if (!doc) return;
-      
-      if (!doc.pages || doc.pages.length === 0) {
-        doc.pages = [{ kind: "page", id: "page1", name: "Page 1", frames: [] }];
-      }
-      const page = doc.pages[0];
-      if (!page.frames || page.frames.length === 0) {
-        page.frames = [{ kind: "frame", id: "frame1", name: "Frame 1", w: 390, h: 844, children: [] }];
-      }
-      
-      const frame = page.frames[0];
-      if (!frame.children) frame.children = [];
+      if (!doc.children) doc.children = [];
       
       const id = `${kind}-${Math.floor(Math.random() * 10000)}`;
-      const newNode: any = { kind, id, x: 50, y: 50 };
+      // Drop in the center of the viewport
+      const vpX = (-camera.x + window.innerWidth / 2) / camera.z;
+      const vpY = (-camera.y + window.innerHeight / 2) / camera.z;
       
-      if (kind === "rect" || kind === "flex") { newNode.w = 100; newNode.h = 100; }
-      if (kind === "text") { newNode.text = "New Text"; }
-      if (kind === "image") { newNode.src = "https://dummyimage.com/100x100/2b59ff/ffffff.png&text=Img"; newNode.w = 100; newNode.h = 100; }
+      const newNode: any = { kind, id, x: Math.round(vpX), y: Math.round(vpY) };
       
-      frame.children.push(newNode);
-      const newSrc = emitWFML(doc);
-      setSrc(newSrc);
+      if (kind === "frame") { newNode.w = 390; newNode.h = 844; }
+      else if (kind === "rect" || kind === "flex") { newNode.w = 100; newNode.h = 100; }
+      else if (kind === "ellipse" || kind === "diamond") { newNode.w = 100; newNode.h = 100; }
+      else if (kind === "sticky") { newNode.w = 120; newNode.h = 120; newNode.style = { fill: "#fef08a" }; }
+      else if (kind === "line") { newNode.w = 100; newNode.h = 2; newNode.style = { stroke: "#0f172a", strokeWidth: 2 }; }
+      else if (kind === "text") { newNode.text = "New Text"; }
+      else if (kind === "image") { newNode.src = "https://dummyimage.com/100x100/2b59ff/ffffff.png&text=Img"; newNode.w = 100; newNode.h = 100; }
       
-      // Automatically show the code panel so the user sees the update
-      setShowCode(true);
+      if (kind === "flex") { newNode.style = { fill: "#f8fafc", stroke: "#cbd5e1" }; }
+
+      doc.children.push(newNode);
+      setSrc(emitWFML(doc));
     } catch (e) {
       console.error("Failed to insert node", e);
     }
+  };
+
+  const renderNode = (n: ViewerNode): React.ReactNode => {
+    const toNum = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
+    const x = toNum(n.x, 0), y = toNum(n.y, 0), w = toNum(n.w, 100), h = toNum(n.h, 24);
+    const sw = n.style?.strokeWidth ?? 1;
+    const fill = n.style?.fill ?? (n.kind === "rect" || n.kind === "frame" ? "#fff" : "none");
+    const stroke = n.style?.stroke ?? (n.kind === "flex" ? "none" : "#1e293b22");
+    const corner = n.style?.corner ?? 8;
+
+    const isSelected = selectedId === n.id;
+    const isDragging = draggingId === n.id;
+
+    const Wrapper = ({ children }: { children: React.ReactNode }) => (
+      <g
+        ref={(el) => { nodeRefs.current[n.id] = el; }}
+        onPointerDown={(e) => handlePointerDownNode(e, n.id)}
+        style={{ cursor: isDragging ? "grabbing" : "grab", opacity: isDragging ? 0.8 : 1 }}
+      >
+        {children}
+        {isSelected && (
+          <rect x={x} y={y} width={w} height={h} fill="none" stroke="#3b82f6" strokeWidth={2} style={{ pointerEvents: "none" }} />
+        )}
+      </g>
+    );
+
+    if (n.kind === "frame") {
+      return (
+        <Wrapper key={n.id}>
+          <rect x={x} y={y} width={w} height={h} rx={12} ry={12} fill={fill} stroke={stroke} strokeWidth={sw} />
+          {n.children?.map(renderNode)}
+        </Wrapper>
+      );
+    }
+
+    if (n.kind === "flex") {
+      const dash = stroke === "#cbd5e1" ? "4" : "none";
+      return (
+        <Wrapper key={n.id}>
+          {fill !== "none" && <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} strokeDasharray={dash} />}
+          {n.children?.map(renderNode)}
+        </Wrapper>
+      );
+    }
+
+    if (n.kind === "rect" || n.kind === "sticky") {
+      const isSticky = n.kind === "sticky";
+      const rectFill = isSticky ? (n.style?.fill ?? "#fef08a") : fill;
+      const shadow = isSticky ? "drop-shadow(0 4px 6px rgba(0,0,0,0.1))" : "none";
+
+      return (
+        <Wrapper key={n.id}>
+          <rect x={x} y={y} width={w} height={h} rx={isSticky ? 2 : corner} ry={isSticky ? 2 : corner} fill={rectFill} stroke={stroke} strokeWidth={sw} style={{ filter: shadow }} />
+          {n.children?.map(renderNode)}
+        </Wrapper>
+      );
+    }
+
+    if (n.kind === "ellipse") {
+      return (
+        <Wrapper key={n.id}>
+          <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} fill={fill} stroke={stroke} strokeWidth={sw} />
+          {n.children?.map(renderNode)}
+        </Wrapper>
+      );
+    }
+
+    if (n.kind === "diamond") {
+      const pts = `${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`;
+      return (
+        <Wrapper key={n.id}>
+          <polygon points={pts} fill={fill} stroke={stroke} strokeWidth={sw} />
+          {n.children?.map(renderNode)}
+        </Wrapper>
+      );
+    }
+
+    if (n.kind === "line") {
+      return (
+        <Wrapper key={n.id}>
+          <line x1={x} y1={y + h / 2} x2={x + w} y2={y + h / 2} stroke={n.style?.stroke ?? "#0f172a"} strokeWidth={sw} />
+        </Wrapper>
+      );
+    }
+
+    if (n.kind === "image") {
+      return (
+        <Wrapper key={n.id}>
+          <image x={x} y={y} width={w} height={h} href={n.src} preserveAspectRatio="xMidYMid meet" />
+        </Wrapper>
+      );
+    }
+
+    if (n.kind === "text") {
+      const txtSize = n.style?.text?.size ?? 14;
+      const weight = n.style?.text?.weight ?? 600;
+      const align = n.style?.text?.align ?? "center";
+      const padX = 8;
+      const txt = n.text || "";
+      const estW = Math.max(w, txt.length * (txtSize * 0.6) + padX * 2);
+      const anchor = align === "center" ? "middle" : align === "left" ? "start" : "end";
+      const tx = align === "center" ? x + estW / 2 : align === "left" ? x + padX : x + estW - padX;
+      const ty = y + h / 2 + txtSize * 0.35;
+      return (
+        <Wrapper key={n.id}>
+          <text x={tx} y={ty} textAnchor={anchor} fontSize={txtSize} fontWeight={weight} fill="#0f172a">{txt}</text>
+        </Wrapper>
+      );
+    }
+
+    if (n.children?.length) {
+      return <Wrapper key={n.id}>{n.children.map(renderNode)}</Wrapper>;
+    }
+
+    return null;
   };
 
   const styles: Record<string, React.CSSProperties> = {
@@ -249,8 +424,8 @@ page Auth:
       background: "#f5f6fa", overflow: "hidden", fontFamily: "sans-serif"
     },
     canvas: {
-      width: "100%", height: "100%", overflow: "auto", position: "absolute", top: 0, left: 0,
-      display: "flex", alignItems: "center", justifyContent: "center"
+      width: "100%", height: "100%", overflow: "hidden", position: "absolute", top: 0, left: 0,
+      touchAction: "none"
     },
     toolbar: {
       position: "absolute", top: 24, left: "50%", transform: "translateX(-50%)",
@@ -286,7 +461,13 @@ page Auth:
     <div style={styles.wrap}>
       {/* Floating Toolbar */}
       <div style={styles.toolbar}>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('frame')}>📱 Screen</button>
+        <div style={{ width: 1, background: "#e2e8f0", margin: "0 4px" }} />
         <button style={styles.toolBtn} onClick={() => handleInsertNode('rect')}>▱ Rect</button>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('ellipse')}>◯ Ellipse</button>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('diamond')}>◇ Diamond</button>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('line')}>— Line</button>
+        <button style={styles.toolBtn} onClick={() => handleInsertNode('sticky')}>📝 Sticky</button>
         <button style={styles.toolBtn} onClick={() => handleInsertNode('text')}>T Text</button>
         <button style={styles.toolBtn} onClick={() => handleInsertNode('image')}>🖼 Image</button>
         <button style={styles.toolBtn} onClick={() => handleInsertNode('flex')}>◫ Flex</button>
@@ -311,104 +492,23 @@ page Auth:
       </div>
 
       {/* MAIN CANVAS */}
-      <div style={styles.canvas} onPointerDown={() => setSelectedId(null)}>
+      <div
+        style={{ ...styles.canvas, cursor: isPanning ? "grabbing" : "default" }}
+        onPointerDown={handlePointerDownCanvas}
+        onPointerMove={handlePointerMoveCanvas}
+        onPointerUp={handlePointerUpCanvas}
+        onPointerLeave={handlePointerUpCanvas}
+        onWheel={handleWheel}
+      >
         {!view ? (
           <div style={{ color: "#64748b" }}>No parse result.</div>
         ) : (
-          view.pages.map((p) => (
-            <div key={p.id} style={{ padding: 80, display: "flex", gap: 60, flexWrap: "wrap", justifyContent: "center", alignItems: "flex-start", minHeight: "100%", boxSizing: "border-box" }}>
-              {p.frames.map((f) => (
-                <div key={f.id} style={styles.frameWrap}>
-                  <svg 
-                    width={f.w} height={f.h} 
-                    style={styles.svg}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    onPointerLeave={handlePointerUp}
-                  >
-                    {f.style?.fill && <rect x={0} y={0} width={f.w} height={f.h} fill={f.style.fill} />}
-                    {f.children.map(function renderNode(n): React.ReactNode {
-                      const toNum = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
-                      const x = toNum(n.x, 0), y = toNum(n.y, 0), w = toNum(n.w, 100), h = toNum(n.h, 24);
-                      const sw = n.style?.strokeWidth ?? 1;
-                      const fill = n.style?.fill ?? (n.kind === "rect" ? "#fff" : "none");
-                      const stroke = n.style?.stroke ?? (n.kind === "flex" ? "none" : "#1e293b22");
-                      const corner = n.style?.corner ?? 8;
-                      
-                      const isSelected = selectedId === n.id;
-                      const isDragging = draggingId === n.id;
-                      
-                      const Wrapper = ({ children }: { children: React.ReactNode }) => (
-                        <g 
-                           key={n.id} 
-                           ref={(el) => { nodeRefs.current[n.id] = el; }}
-                           onPointerDown={(e) => handlePointerDown(e, n.id)}
-                           style={{ cursor: isDragging ? "grabbing" : "grab", opacity: isDragging ? 0.8 : 1 }}
-                        >
-                          {children}
-                          {isSelected && (
-                            <rect x={x} y={y} width={w} height={h} fill="none" stroke="#3b82f6" strokeWidth={2} style={{ pointerEvents: 'none' }} />
-                          )}
-                        </g>
-                      );
-
-                      if (n.kind === "flex") {
-                        return (
-                          <Wrapper key={n.id}>
-                            {fill !== "none" && <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />}
-                            {n.children?.map(renderNode)}
-                          </Wrapper>
-                        );
-                      }
-
-                      if (n.kind === "rect") {
-                        if (n.children?.length) {
-                          return (
-                            <Wrapper key={n.id}>
-                              <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />
-                              {n.children.map(renderNode)}
-                            </Wrapper>
-                          );
-                        }
-                        return (
-                          <Wrapper key={n.id}>
-                            <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />
-                          </Wrapper>
-                        );
-                      }
-
-                      if (n.kind === "image")
-                        return (
-                          <Wrapper key={n.id}>
-                            <image x={x} y={y} width={w} height={h} href={n.src} preserveAspectRatio="xMidYMid meet" />
-                          </Wrapper>
-                        );
-
-                      // text
-                      if (n.kind === "text") {
-                        const txtSize = n.style?.text?.size ?? 14;
-                        const weight = n.style?.text?.weight ?? 600;
-                        const align = n.style?.text?.align ?? "center";
-                        const padX = 8;
-                        const txt = n.text || "";
-                        const estW = Math.max(w, txt.length * (txtSize * 0.6) + padX * 2);
-                        const anchor = align === "center" ? "middle" : align === "left" ? "start" : "end";
-                        const tx = align === "center" ? x + estW / 2 : align === "left" ? x + padX : x + estW - padX;
-                        const ty = y + h / 2 + txtSize * 0.35;
-                        return (
-                          <Wrapper key={n.id}>
-                            <text x={tx} y={ty} textAnchor={anchor} fontSize={txtSize} fontWeight={weight} fill="#0f172a">{txt}</text>
-                          </Wrapper>
-                        );
-                      }
-                      
-                      return null;
-                    })}
-                  </svg>
-                </div>
-              ))}
-            </div>
-          ))
+          <svg width="100%" height="100%" style={styles.svg}>
+            <rect x={0} y={0} width="100%" height="100%" fill="#f5f6fa" />
+            <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.z})`}>
+              {view.children.map(renderNode)}
+            </g>
+          </svg>
         )}
       </div>
     </div>
@@ -417,44 +517,41 @@ page Auth:
 
 // ---- Map real AST → viewer types ----
 function mapDoc(astDoc: any): ViewerDoc {
-  const out: ViewerDoc = { pages: [] };
-  for (const p of astDoc.pages || []) {
-    const page = { id: slug(p.name || p.id), name: p.name || p.id, frames: [] as ViewerFrame[] };
-    for (const f of p.frames || []) {
-      const frame: ViewerFrame = { id: f.id, name: f.name, w: f.w || 0, h: f.h || 0, style: f.style, children: [] };
-      const mapNode = (n: any): ViewerNode => {
-        const mapped: ViewerNode = {
-          kind: n.kind, id: n.id, x: n.x, y: n.y, w: n.w, h: n.h,
-          text: n.text, src: n.src,
-          style: { fill: n.style?.fill, stroke: n.style?.stroke, strokeWidth: n.style?.strokeWidth, corner: n.style?.corner, text: n.style?.text },
-          place: n.place as PlacementRule[] | undefined,
-        };
-        if (n.kind === "flex") {
-          mapped.direction = n.direction || "column";
-          mapped.gap = n.gap || 0;
-          mapped.align = n.align;
-          mapped.justify = n.justify;
-          mapped.padding = n.padding || 0;
-        }
-        if (n.children) {
-          mapped.children = n.children.map(mapNode);
-        }
-        return mapped;
-      };
-      
-      for (const n of f.children || []) {
-        frame.children.push(mapNode(n));
-      }
-      page.frames.push(frame);
-    }
-    out.pages.push(page as any);
+  const mapNode = (n: any): ViewerNode => {
+    const mapped: ViewerNode = {
+      kind: n.kind,
+      id: n.id,
+      x: n.x,
+      y: n.y,
+      w: n.w,
+      h: n.h,
+      text: n.text,
+      src: n.src,
+      style: { fill: n.style?.fill, stroke: n.style?.stroke, strokeWidth: n.style?.strokeWidth, corner: n.style?.corner, text: n.style?.text },
+      place: n.place as PlacementRule[] | undefined,
+    };
+    if (n.direction) mapped.direction = n.direction;
+    if (n.gap !== undefined) mapped.gap = n.gap;
+    if (n.align) mapped.align = n.align;
+    if (n.justify) mapped.justify = n.justify;
+    if (n.padding !== undefined) mapped.padding = n.padding;
+    if (n.children) mapped.children = n.children.map(mapNode);
+    return mapped;
+  };
+
+  if (Array.isArray(astDoc?.children)) {
+    return { children: astDoc.children.map(mapNode) };
   }
-  return out;
+
+  const fallbackChildren = (astDoc?.pages || []).flatMap((p: any) => p.frames || []);
+  return { children: fallbackChildren.map(mapNode) };
 }
 
 // ---- Tiny layout engine for placement rules ----
 function layoutDoc(doc: ViewerDoc): ViewerDoc {
   const next: ViewerDoc = JSON.parse(JSON.stringify(doc));
+  const rootW = typeof window !== "undefined" ? window.innerWidth : 1920;
+  const rootH = typeof window !== "undefined" ? window.innerHeight : 1080;
 
   const resolvePlace = (node: ViewerNode, siblings: ViewerNode[], parentW: number, parentH: number, parentX: number = 0, parentY: number = 0) => {
     const idx = Object.fromEntries(siblings.map(n => [n.id, n]));
@@ -497,11 +594,14 @@ function layoutDoc(doc: ViewerDoc): ViewerDoc {
       node.h = node.h ?? (size * 1.6);
     } else if (node.kind === "image") {
       node.w = node.w ?? 64; node.h = node.h ?? 64;
-    } else if (node.kind === "rect" || node.kind === "flex") {
+    } else if (node.kind === "rect" || node.kind === "flex" || node.kind === "ellipse" || node.kind === "diamond" || node.kind === "sticky") {
       if (node.w === "fill") node.w = parentW;
       if (node.h === "fill") node.h = parentH;
       node.w = node.w ?? (node.kind === "flex" ? parentW : 100); 
-      node.h = node.h ?? (node.kind === "flex" ? "hug" : 40);
+      node.h = node.h ?? (node.kind === "flex" ? "hug" : node.kind === "sticky" ? 100 : 40);
+    } else if (node.kind === "line") {
+      node.w = node.w ?? 100;
+      node.h = node.h ?? 2;
     }
 
     // 2. Resolve absolute placement rules if any
@@ -511,7 +611,7 @@ function layoutDoc(doc: ViewerDoc): ViewerDoc {
     if (node.y === undefined) node.y = parentY + 16;
 
     // 3. Layout Children
-    if (node.children) {
+      if (node.children) {
       if (node.kind === "flex") {
         const isCol = node.direction !== "row";
         const gap = node.gap || 0;
@@ -528,7 +628,9 @@ function layoutDoc(doc: ViewerDoc): ViewerDoc {
              child.y = cy;
           }
 
-          layoutNode(child, node.children, child.x ?? cx, child.y ?? cy, Number(node.w) - pad * 2, Number(node.h) === Number.NaN ? parentH : Number(node.h));
+          const availableW = Number.isFinite(Number(node.w)) ? Number(node.w) : parentW;
+          const availableH = Number.isFinite(Number(node.h)) ? Number(node.h) : parentH;
+          layoutNode(child, node.children, child.x ?? cx, child.y ?? cy, Math.max(0, availableW - pad * 2), Math.max(0, availableH));
           
           // Simple stacking logic (main axis)
           if (!child.place || child.place.length === 0) {
@@ -554,12 +656,8 @@ function layoutDoc(doc: ViewerDoc): ViewerDoc {
     }
   };
 
-  for (const page of next.pages) {
-    for (const frame of page.frames) {
-      for (const node of frame.children) {
-        layoutNode(node, frame.children, 0, 0, frame.w, frame.h);
-      }
-    }
+  for (const node of next.children || []) {
+    layoutNode(node, next.children || [], 0, 0, rootW, rootH);
   }
   return next;
 }

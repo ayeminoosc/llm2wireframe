@@ -1,40 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+# llm2wireframe
 
-## Getting Started
+`llm2wireframe` is an Excalidraw-style wireframing canvas backed by `WFML`, a text format designed to be readable, editable, and understandable by LLMs.
 
-First, run the development server:
+Users should be able to sketch naturally, like paper and pencil. The system should translate those visual edits into a structured `WFML` document that preserves layout, hierarchy, and semantic meaning well enough for an LLM to reason about and co-edit the design.
+
+## Product Direction
+
+- Visual-first studio for normal users
+- `WFML` as the source of truth
+- Infinite canvas interaction model
+- Semantic export that is more useful to LLMs than raw drawing JSON
+- Extensible architecture with core components and plugins
+
+## Core Principles
+
+1. The studio must stay intuitive.
+2. `WFML` can be richer than the visible UI.
+3. Complexity belongs in the engine, not in the user workflow.
+4. Semantic structure should be inferred when possible.
+5. Plugins should extend the system without fragmenting the language.
+
+## Architecture Overview
+
+The intended architecture is split into five layers:
+
+1. `WFML core`
+2. `engine`
+3. `core component library`
+4. `plugin system`
+5. `studio UI`
+
+See `docs/ARCHITECTURE.md` for the detailed design and implementation plan.
+
+## Current State
+
+The repository is currently an early prototype.
+
+- `src/parser/wfml-grammar-parser-emitter.ts` contains the current `WFML` parser and emitter
+- `src/pages/wfml_react_viewer.tsx` currently mixes viewer UI, interaction handling, layout, and document mutation
+- the viewer is being moved toward a single infinite SVG canvas
+- some docs and tests still reflect the older page-based model and need to be updated
+
+## Running Locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:3002`.
+
+## Useful Commands
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run build
+npm run test
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Near-Term Priorities
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
-
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
-
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
-
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+1. Align tests and docs with the flat root `children` model.
+2. Extract engine logic out of `wfml_react_viewer.tsx`.
+3. Introduce a registry for built-in node definitions.
+4. Establish the boundary between `WFML core`, engine, and plugins.
+5. Add semantic inference without making the studio harder to use.
