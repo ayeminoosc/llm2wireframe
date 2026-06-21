@@ -4,7 +4,7 @@ interface WFDocument {
   meta: { version: string; author?: string; seed?: number };
   assets: Asset[];
   components: Component[];
-  pages: Page[];
+  children: Node[];
 }
 
 interface Asset { id: string; kind: "image" | "font" | "iconpack"; src: string; meta?: any }
@@ -15,12 +15,9 @@ interface Component {
   props?: Record<string, PropSpec>; // e.g., { label: {type:"string", default:"Button"} }
 }
 
-interface Page { id: string; name: string; frames: Frame[] }
-
 interface Frame extends NodeBase {
   kind: "frame";
   w: number; h: number; name?: string;
-  layout?: FrameLayout; // grid, snap, viewport, etc.
   children: Node[];
 }
 
@@ -31,9 +28,10 @@ type Node =
 
 interface NodeBase {
   id: string; name?: string; z?: number; lock?: boolean; hidden?: boolean; opacity?: number;
-  x?: number; y?: number; w?: number; h?: number; rotation?: number;
+  x?: number; y?: number; w?: number | "fill" | "hug" | "auto"; h?: number | "fill" | "hug" | "auto"; rotation?: number;
   place?: PlacementRule[]; tags?: string[];
   style?: Style;
+  children?: Node[];
 }
 
 interface Style {
@@ -51,10 +49,10 @@ interface Diamond extends NodeBase { kind: "diamond" }
 interface TextNode extends NodeBase { kind: "text"; text: string }
 interface Icon extends NodeBase { kind: "icon"; name: string; pack?: string }
 interface ImageNode extends NodeBase { kind: "image"; src: string; fit?: "cover"|"contain"|"stretch" }
-interface Line extends NodeBase { kind: "line"; from: AnchorRef; to: AnchorRef; label?: string }
+interface Line extends NodeBase { kind: "line"; from?: AnchorRef; to?: AnchorRef; label?: string }
 interface Arrow extends Line { kind: "arrow"; startHead?: ArrowHead; endHead?: ArrowHead; route?: "straight"|"orthogonal"|"curve" }
-interface Polyline extends NodeBase { kind: "polyline"; points: [number,number][] }
-interface Freehand extends NodeBase { kind: "freehand"; points: [number,number][] }
+interface Polyline extends NodeBase { kind: "polyline"; points?: [number,number][] }
+interface Freehand extends NodeBase { kind: "freehand"; points?: [number,number][] }
 interface Sticky extends NodeBase { kind: "sticky"; text: string; color?: string }
 interface Group extends NodeBase { kind: "group"; children: Node[] }
 interface Instance extends NodeBase { kind: "instance"; of: string; overrides?: Record<string, any> }

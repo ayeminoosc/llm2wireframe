@@ -1,10 +1,12 @@
-document       := meta? assets? components? pages+
-pages          := "page" ident block+
-block          := NEWLINE INDENT (kvpair | section | shape | group | frame)+ DEDENT
+document       := meta? assets? components? rootNodes+
+rootNodes       := node+
+block          := NEWLINE INDENT (kvpair | section | shape | group | frame | use)+ DEDENT
 section        := ("assets" | "components" | "meta") block
 frame          := "frame" ident block
 group          := "group" ident block
-shape          := (rect|ellipse|diamond|text|icon|image|arrow|line|polyline|sticky|freehand) ident block
+use            := "use" ident block
+shape          := (rect|ellipse|diamond|text|icon|image|arrow|line|polyline|sticky|freehand|flex|plugin-kind) ident block
+node           := frame | group | use | shape
 kvpair         := key ":" value
 key            := ident ( "." ident )*
 value          := string | number | bool | enum | list | ref

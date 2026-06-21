@@ -24,58 +24,57 @@ components:
       align: center
       place: centered in #btn-base
 
-page Auth:
-  frame iPhone13:
-    w: 390
-    h: 844
-    name: "iPhone 13"
-    sketch: true
+frame iPhone13:
+  w: 390
+  h: 844
+  name: "iPhone 13"
+  sketch: true
 
-    flex container:
+  flex container:
+    direction: column
+    gap: 24
+    padding: 32
+    align: center
+    w: fill
+    h: hug
+    place: centered in #iPhone13
+    
+    image logo:
+      src: @logo
+      w: 64
+      h: 64
+
+    text title:
+      text: "Welcome back"
+      size: 24
+      weight: 700
+
+    flex form:
       direction: column
-      gap: 24
-      padding: 32
-      align: center
+      gap: 16
       w: fill
       h: hug
-      place: centered in #iPhone13
-      
-      image logo:
-        src: @logo
-        w: 64
-        h: 64
 
-      text title:
-        text: "Welcome back"
-        size: 24
-        weight: 700
-
-      flex form:
-        direction: column
-        gap: 16
+      rect email:
         w: fill
-        h: hug
-
-        rect email:
-          w: fill
-          h: 44
-          corner: 10
-          stroke: #999
-          fill: #fff
-          
-        rect password:
-          w: fill
-          h: 44
-          corner: 10
-          stroke: #999
-          fill: #fff
-          
-        use ButtonPrimary login-btn:
-          label: "Sign in"
-          w: fill
-          
-        text forgot:
-          text: "Forgot password?"
-          size: 12
-          stroke: #2B59FF
-          link.to: page ResetPassword
+        h: 44
+        corner: 10
+        stroke: #999
+        fill: #fff
+        
+      rect password:
+        w: fill
+        h: 44
+        corner: 10
+        stroke: #999
+        fill: #fff
+        
+      use ButtonPrimary login-btn:
+        label: "Sign in"
+        w: fill
+        
+      text forgot:
+        text: "Forgot password?"
+        size: 12
+        stroke: #2B59FF
+        link.to: #reset-password
