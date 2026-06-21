@@ -12,7 +12,7 @@ components:
   # A reusable primary button
   component ButtonPrimary:
     rect btn-base:
-      w: 160
+      w: fill
       h: 44
       fill: #2B59FF
       corner: 10
@@ -23,7 +23,6 @@ components:
       weight: 600
       align: center
       place: centered in #btn-base
-    exports: [btn-base, btn-label]
 
 page Auth:
   frame iPhone13:
@@ -32,51 +31,51 @@ page Auth:
     name: "iPhone 13"
     sketch: true
 
-    image logo:
-      src: @logo
-      w: 64
-      h: 64
-      place: topCenter of self offset(0,48)
+    flex container:
+      direction: column
+      gap: 24
+      padding: 32
+      align: center
+      w: fill
+      h: hug
+      place: centered in #iPhone13
+      
+      image logo:
+        src: @logo
+        w: 64
+        h: 64
 
-    text title:
-      text: "Welcome back"
-      size: 24
-      weight: 700
-      place: below #logo by 12, centerX
+      text title:
+        text: "Welcome back"
+        size: 24
+        weight: 700
 
-    rect email:
-      w: 300
-      h: 44
-      corner: 10
-      stroke: #999
-      fill: #fff
-      place: below #title by 24, centerX
-    text email-ph:
-      text: "Email"
-      size: 14
-      opacity: 0.6
-      place: leftInside #email by 12, centerY
+      flex form:
+        direction: column
+        gap: 16
+        w: fill
+        h: hug
 
-    rect password:
-      w: 300
-      h: 44
-      corner: 10
-      stroke: #999
-      fill: #fff
-      place: below #email by 12, alignLeft #email
-    text password-ph:
-      text: "Password"
-      size: 14
-      opacity: 0.6
-      place: leftInside #password by 12, centerY
-
-    use ButtonPrimary login-btn:
-      label: "Sign in"
-      place: below #password by 16, centerX
-
-    text forgot:
-      text: "Forgot password?"
-      size: 12
-      stroke: #2B59FF
-      place: below #login-btn by 12, centerX
-      link.to: page ResetPassword
+        rect email:
+          w: fill
+          h: 44
+          corner: 10
+          stroke: #999
+          fill: #fff
+          
+        rect password:
+          w: fill
+          h: 44
+          corner: 10
+          stroke: #999
+          fill: #fff
+          
+        use ButtonPrimary login-btn:
+          label: "Sign in"
+          w: fill
+          
+        text forgot:
+          text: "Forgot password?"
+          size: 12
+          stroke: #2B59FF
+          link.to: page ResetPassword
