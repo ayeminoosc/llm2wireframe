@@ -1,5 +1,5 @@
 // src/components/WFMLReactViewerInline.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 
 // ⬇️ Adjust this to your parser location
 import { parseWFML } from "../parser/wfml-grammar-parser-emitter";
@@ -119,6 +119,13 @@ page Auth:
   const [parseErrors, setParseErrors] = useState<any[]>([]);
   const parsed = useMemo(() => parseWFML(src), [src]);
   const [view, setView] = useState<ViewerDoc | null>(null);
+  
+  // Interactive state
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const nodeRefs = useRef<Record<string, SVGGElement | null>>({});
+  const dragStartPos = useRef({ x: 0, y: 0 });
+  const currentDelta = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     const { doc, errors } = parsed as any;
@@ -132,6 +139,72 @@ page Auth:
     setParseErrors(errors || []);
     if (!doc) return;
     setView(layoutDoc(mapDoc(doc)));
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<SVGElement>, nodeId: string) => {
+    e.stopPropagation();
+    setSelectedId(nodeId);
+    setDraggingId(nodeId);
+    
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    currentDelta.current = { x: 0, y: 0 };
+    
+    (e.target as SVGElement).setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<SVGElement>) => {
+    if (!draggingId) return;
+    
+    const dx = e.clientX - dragStartPos.current.x;
+    const dy = e.clientY - dragStartPos.current.y;
+    currentDelta.current = { x: dx, y: dy };
+    
+    // Fast DOM update without React state re-render
+    const el = nodeRefs.current[draggingId];
+    if (el) {
+      el.setAttribute("transform", `translate(${dx}, ${dy})`);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<SVGElement>) => {
+    if (!draggingId || !view) return;
+    (e.target as SVGElement).releasePointerCapture(e.pointerId);
+    
+    const dx = currentDelta.current.x;
+    const dy = currentDelta.current.y;
+    const idToUpdate = draggingId;
+    
+    // Reset dragging state and clear DOM transform immediately
+    setDraggingId(null);
+    const el = nodeRefs.current[idToUpdate];
+    if (el) el.removeAttribute("transform");
+    
+    // Only if we actually moved do we commit the change to React state
+    if (dx !== 0 || dy !== 0) {
+      const newView = JSON.parse(JSON.stringify(view));
+      const updateNodePos = (nodes: ViewerNode[]): boolean => {
+        for (const n of nodes) {
+          if (n.id === idToUpdate) {
+            n.x = (n.x || 0) + dx;
+            n.y = (n.y || 0) + dy;
+            // Strip place rules so it stays where dropped
+            n.place = []; 
+            return true;
+          }
+          if (n.children && updateNodePos(n.children)) return true;
+        }
+        return false;
+      };
+
+      for (const page of newView.pages) {
+        for (const frame of page.frames) {
+          if (updateNodePos(frame.children)) break;
+        }
+      }
+      setView(newView);
+      
+      // TODO: Phase 2 - Trigger Inverse Layout Solver here and emitWFML
+    }
   };
 
   const styles: Record<string, React.CSSProperties> = {
@@ -182,7 +255,13 @@ page Auth:
               <div style={styles.pageTitle}>Page: {p.name}</div>
               {p.frames.map((f) => (
                 <div key={f.id} style={styles.frameWrap}>
-                  <svg width={f.w} height={f.h} style={styles.svg}>
+                  <svg 
+                    width={f.w} height={f.h} 
+                    style={styles.svg}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerLeave={handlePointerUp}
+                  >
                     {f.style?.fill && <rect x={0} y={0} width={f.w} height={f.h} fill={f.style.fill} />}
                     {f.children.map(function renderNode(n): React.ReactNode {
                       const toNum = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
@@ -191,30 +270,55 @@ page Auth:
                       const fill = n.style?.fill ?? (n.kind === "rect" ? "#fff" : "none");
                       const stroke = n.style?.stroke ?? (n.kind === "flex" ? "none" : "#1e293b22");
                       const corner = n.style?.corner ?? 8;
+                      
+                      const isSelected = selectedId === n.id;
+                      const isDragging = draggingId === n.id;
+                      
+                      const Wrapper = ({ children }: { children: React.ReactNode }) => (
+                        <g 
+                           key={n.id} 
+                           ref={(el) => { nodeRefs.current[n.id] = el; }}
+                           onPointerDown={(e) => handlePointerDown(e, n.id)}
+                           style={{ cursor: isDragging ? "grabbing" : "grab", opacity: isDragging ? 0.8 : 1 }}
+                        >
+                          {children}
+                          {isSelected && (
+                            <rect x={x} y={y} width={w} height={h} fill="none" stroke="#3b82f6" strokeWidth={2} style={{ pointerEvents: 'none' }} />
+                          )}
+                        </g>
+                      );
 
                       if (n.kind === "flex") {
                         return (
-                          <g key={n.id}>
+                          <Wrapper key={n.id}>
                             {fill !== "none" && <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />}
                             {n.children?.map(renderNode)}
-                          </g>
+                          </Wrapper>
                         );
                       }
 
                       if (n.kind === "rect") {
                         if (n.children?.length) {
                           return (
-                            <g key={n.id}>
+                            <Wrapper key={n.id}>
                               <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />
                               {n.children.map(renderNode)}
-                            </g>
+                            </Wrapper>
                           );
                         }
-                        return <rect key={n.id} x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />;
+                        return (
+                          <Wrapper key={n.id}>
+                            <rect x={x} y={y} width={w} height={h} rx={corner} ry={corner} fill={fill} stroke={stroke} strokeWidth={sw} />
+                          </Wrapper>
+                        );
                       }
 
                       if (n.kind === "image")
-                        return <image key={n.id} x={x} y={y} width={w} height={h} href={n.src} preserveAspectRatio="xMidYMid meet" />;
+                        return (
+                          <Wrapper key={n.id}>
+                            <image x={x} y={y} width={w} height={h} href={n.src} preserveAspectRatio="xMidYMid meet" />
+                          </Wrapper>
+                        );
 
                       // text
                       if (n.kind === "text") {
@@ -227,7 +331,11 @@ page Auth:
                         const anchor = align === "center" ? "middle" : align === "left" ? "start" : "end";
                         const tx = align === "center" ? x + estW / 2 : align === "left" ? x + padX : x + estW - padX;
                         const ty = y + h / 2 + txtSize * 0.35;
-                        return <text key={n.id} x={tx} y={ty} textAnchor={anchor} fontSize={txtSize} fontWeight={weight} fill="#0f172a">{txt}</text>;
+                        return (
+                          <Wrapper key={n.id}>
+                            <text x={tx} y={ty} textAnchor={anchor} fontSize={txtSize} fontWeight={weight} fill="#0f172a">{txt}</text>
+                          </Wrapper>
+                        );
                       }
                       
                       return null;
