@@ -362,7 +362,7 @@ function parseNodeBlock(C: ParseContext, indent: number, node: any, canHaveChild
 
 function assignNodeKey(node: any, key: string, value: any, line: number, C: ParseContext) {
   const baseKeys = new Set(["id","name","z","lock","hidden","opacity","x","y","w","h","rotation","tags"]);
-  const styleKeys = new Set(["fill","stroke","strokeWidth","dash","corner","shadow","sketch","roughness","seed"]);
+  const styleKeys = new Set(["fill","stroke","strokeWidth","strokeStyle","dash","corner","edges","shadow","sketch","roughness","seed"]);
   const textStyleKeys = new Set(["font","size","weight","align","wrap","autoSize"]);
 
   if (key === "place") { node.place = parsePlacement(String(value), line, C); return; }
@@ -551,7 +551,7 @@ function emitNode(b: string[], n: Node | Group | Instance, level: number, IND: s
 function emitNodeBody(b: string[], n: any, level: number, IND: string, includeChildren: boolean) {
   const kv: any = {};
   for (const k of ["x","y","w","h","rotation","opacity","z","lock","hidden","name"]) if (n[k] !== undefined) kv[k] = n[k];
-  if (n.kind === "text" || n.kind === "sticky") kv.text = n.text;
+  if (n.text !== undefined) kv.text = n.text;
   if (n.kind === "image") { kv.src = n.src; if (n.fit) kv.fit = n.fit }
   if (n.kind === "instance") { if (n.of) kv.of = n.of; if (n.overrides) kv.overrides = n.overrides }
   emitKV(b, kv, level, IND);
@@ -601,7 +601,7 @@ function emitObjectKV(b: string[], obj: Record<string, any>, level: number, IND:
 function emitStyle(b: string[], s: Style | undefined, level: number, IND: string) {
   if (!s) return;
   b.push(IND.repeat(level) + `style:`);
-  const simple: any = { fill: s.fill, stroke: s.stroke, strokeWidth: s.strokeWidth, corner: s.corner, sketch: s.sketch, roughness: s.roughness, seed: s.seed };
+  const simple: any = { fill: s.fill, stroke: s.stroke, strokeWidth: s.strokeWidth, strokeStyle: s.strokeStyle, corner: s.corner, edges: s.edges, sketch: s.sketch, roughness: s.roughness, seed: s.seed };
   emitKV(b, simple, level + 1, IND);
   if (s.dash) b.push(IND.repeat(level + 1) + `dash: ${JSON.stringify(s.dash)}`);
   if (s.shadow) { b.push(IND.repeat(level + 1) + `shadow:`); emitObjectKV(b, s.shadow as any, level + 2, IND); }

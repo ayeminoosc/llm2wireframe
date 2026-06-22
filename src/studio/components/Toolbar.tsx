@@ -4,23 +4,24 @@ import type { NodeDefinition } from "../../engine/registry";
 type Props = {
   tools: NodeDefinition[];
   onInsert: (kind: string) => void;
-  actions?: { key: string; label: string; disabled?: boolean; onClick: () => void }[];
+  activeToolKind?: string | null;
+  actions?: { key: string; label: string; disabled?: boolean; active?: boolean; onClick: () => void }[];
 };
 
-export function Toolbar({ tools, onInsert, actions = [] }: Props) {
+export function Toolbar({ tools, onInsert, activeToolKind = null, actions = [] }: Props) {
   return (
     <div style={styles.toolbar}>
       {tools.map((tool) => (
         <React.Fragment key={tool.kind}>
           {tool.tool?.separatorBefore ? <div style={styles.separator} /> : null}
-          <button style={styles.toolBtn} onClick={() => onInsert(tool.kind)}>
+          <button style={{ ...styles.toolBtn, ...(activeToolKind === tool.kind ? styles.toolBtnActive : null) }} onClick={() => onInsert(tool.kind)}>
             {tool.tool?.icon} {tool.tool?.label}
           </button>
         </React.Fragment>
       ))}
       {actions.length ? <div style={styles.separator} /> : null}
       {actions.map((action) => (
-        <button key={action.key} style={{ ...styles.toolBtn, opacity: action.disabled ? 0.5 : 1 }} onClick={action.onClick} disabled={action.disabled}>
+        <button key={action.key} style={{ ...styles.toolBtn, ...(action.active ? styles.toolBtnActive : null), opacity: action.disabled ? 0.5 : 1 }} onClick={action.onClick} disabled={action.disabled}>
           {action.label}
         </button>
       ))}
@@ -32,8 +33,8 @@ const styles = {
   toolbar: {
     position: "absolute",
     top: 24,
-    left: "50%",
-    transform: "translateX(-50%)",
+    left: 24,
+    right: 24,
     display: "flex",
     gap: 8,
     padding: 8,
@@ -41,6 +42,9 @@ const styles = {
     borderRadius: 8,
     boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
     zIndex: 10,
+    overflowX: "auto",
+    alignItems: "center",
+    whiteSpace: "nowrap",
   } as React.CSSProperties,
   toolBtn: {
     padding: "8px 12px",
@@ -50,6 +54,10 @@ const styles = {
     borderRadius: 4,
     fontWeight: 600,
     color: "#475569",
+  } as React.CSSProperties,
+  toolBtnActive: {
+    background: "#e0e7ff",
+    color: "#3730a3",
   } as React.CSSProperties,
   separator: {
     width: 1,

@@ -6,8 +6,12 @@ export type NodeFactory = (id: string, x: number, y: number) => any;
 export type NodePropertyDefinition = {
   key: string;
   label: string;
-  type: "text" | "number" | "color" | "select";
-  options?: { label: string; value: string }[];
+  type: "text" | "number" | "color" | "select" | "buttonGroup" | "slider";
+  group?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: { label: string; value: string; swatch?: string; icon?: string }[];
 };
 
 export type NodeToolDefinition = {

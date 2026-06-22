@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 
 import { applyDragToView, bindComponentNodeFieldToPropInSource, copyNodeFromSource, createComponentFromNodeInSource, deleteComponentNodeFromSource, deleteNodeFromSource, duplicateNodeInSource, insertNodeIntoComponentInSource, insertRootNodeIntoSource, moveComponentNodeInSource, pasteNodeIntoSource, resolveDragToSource, updateComponentNodePropertyInSource, updateInstanceOverrideInSource, updateNodePropertyInSource } from "../engine/commands";
-import { createDefaultCamera, fitCameraToBounds, getViewportCenterWorldPoint, panCamera, scrollCamera, zoomCameraAtPoint, type Camera } from "../engine/camera";
+import { createDefaultCamera, fitCameraToBounds, panCamera, scrollCamera, zoomCameraAtPoint, type Camera } from "../engine/camera";
 import { layoutDoc } from "../engine/layout";
 import { createNodeFromRegistry, createNodeRegistry, getToolDefinitions, type NodePropertyDefinition } from "../engine/registry";
 import { findNodeById, getSceneBounds, mapDoc, type ViewerDoc, type ViewerNode } from "../engine/scene";
@@ -23,6 +23,8 @@ export default function WFMLReactViewerInline({
   height = "100vh",
 }: { initialText?: string; height?: number | string }) {
   type EditorMode = { type: "document" } | { type: "component"; componentId: string };
+  type DraftShape = { kind: string; id: string; startX: number; startY: number; currentX: number; currentY: number };
+  type EditingText = { nodeId: string; value: string };
 
   const SAMPLE = initialText ?? `meta:
   version: 0.1
@@ -102,8 +104,11 @@ frame iPhone13:
   // Interactive state
   const [showCode, setShowCode] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode>({ type: "document" });
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draftShape, setDraftShape] = useState<DraftShape | null>(null);
+  const [editingText, setEditingText] = useState<EditingText | null>(null);
   
   // Camera State
   const [camera, setCamera] = useState<Camera>(createDefaultCamera());
@@ -125,6 +130,23 @@ frame iPhone13:
   const currentDelta = useRef({ x: 0, y: 0 });
 
   const zoomPercent = Math.round(camera.z * 100);
+  const dragDrawToolKinds = new Set(["frame", "rect", "flex", "ellipse", "diamond", "sticky", "image"]);
+
+  const getCanvasWorldPoint = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left - camera.x) / camera.z,
+      y: (e.clientY - rect.top - camera.y) / camera.z,
+    };
+  };
+
+  const normalizeDraftBounds = (shape: DraftShape) => {
+    const left = Math.min(shape.startX, shape.currentX);
+    const top = Math.min(shape.startY, shape.currentY);
+    const width = Math.max(8, Math.abs(shape.currentX - shape.startX));
+    const height = Math.max(8, Math.abs(shape.currentY - shape.startY));
+    return { x: Math.round(left), y: Math.round(top), w: Math.round(width), h: Math.round(height) };
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -184,8 +206,11 @@ frame iPhone13:
       }
       if (event.key === "Escape") {
         event.preventDefault();
+        setEditingText(null);
         setSelectedId(null);
         setDraggingId(null);
+        setDraftShape(null);
+        setActiveTool(null);
         return;
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && selectedId) {
@@ -249,8 +274,19 @@ frame iPhone13:
     if (selectedId && !selectedNode) {
       setSelectedId(null);
       setDraggingId(null);
+      setEditingText((current) => current && current.nodeId === selectedId ? null : current);
     }
   }, [selectedId, selectedNode]);
+
+  const commitInlineTextEdit = (nextValue?: string) => {
+    if (!editingText || hasParseErrors) return;
+    const value = nextValue ?? editingText.value;
+    const property: NodePropertyDefinition = { key: "text", label: "Text", type: "text" };
+    setDocument((prev) => editorMode.type === "component"
+      ? updateComponentNodePropertyInSource(prev, editorMode.componentId, editingText.nodeId, property.key, value)
+      : updateNodePropertyInSource(prev, editingText.nodeId, property.key, value));
+    setEditingText(null);
+  };
 
   const rebuild = () => {
     const { doc, errors } = parseWFML(src) as any;
@@ -313,6 +349,33 @@ frame iPhone13:
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
+
+    if (activeTool && dragDrawToolKinds.has(activeTool)) {
+      const world = getCanvasWorldPoint(e);
+      const id = `${activeTool}-${Math.floor(Math.random() * 10000)}`;
+      setDraftShape({ kind: activeTool, id, startX: world.x, startY: world.y, currentX: world.x, currentY: world.y });
+      setSelectedId(null);
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (activeTool) {
+      if (hasParseErrors) return;
+      const world = getCanvasWorldPoint(e);
+      try {
+        const id = `${activeTool}-${Math.floor(Math.random() * 10000)}`;
+        const newNode = createNodeFromRegistry(registry, activeTool, id, Math.round(world.x), Math.round(world.y));
+        setDocument((prev) => editorMode.type === "component"
+          ? insertNodeIntoComponentInSource(prev, editorMode.componentId, newNode)
+          : insertRootNodeIntoSource(prev, newNode));
+        setSelectedId(id);
+        setActiveTool(null);
+      } catch (error) {
+        console.error("Failed to insert node", error);
+      }
+      return;
+    }
+
     setSelectedId(null);
   };
 
@@ -322,6 +385,12 @@ frame iPhone13:
       const dy = e.clientY - dragStartPos.current.y;
       dragStartPos.current = { x: e.clientX, y: e.clientY };
       setCamera((c) => panCamera(c, dx, dy));
+      return;
+    }
+
+    if (draftShape) {
+      const world = getCanvasWorldPoint(e);
+      setDraftShape((current) => current ? { ...current, currentX: world.x, currentY: world.y } : current);
       return;
     }
     
@@ -338,6 +407,26 @@ frame iPhone13:
     if (isPanning) {
       setIsPanning(false);
       e.currentTarget.releasePointerCapture(e.pointerId);
+      return;
+    }
+
+    if (draftShape) {
+      const bounds = normalizeDraftBounds(draftShape);
+      const newNode = {
+        ...createNodeFromRegistry(registry, draftShape.kind, draftShape.id, bounds.x, bounds.y),
+        x: bounds.x,
+        y: bounds.y,
+        w: bounds.w,
+        h: bounds.h,
+      };
+      setDraftShape(null);
+      if (hasParseErrors) return;
+      setDocument((prev) => editorMode.type === "component"
+        ? insertNodeIntoComponentInSource(prev, editorMode.componentId, newNode)
+        : insertRootNodeIntoSource(prev, newNode));
+      setSelectedId(newNode.id);
+      setActiveTool(null);
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
       return;
     }
     
@@ -376,6 +465,7 @@ frame iPhone13:
   };
 
   const handlePointerDownNode = (e: React.PointerEvent<SVGElement>, nodeId: string) => {
+    if (editingText && editingText.nodeId !== nodeId) commitInlineTextEdit();
     e.stopPropagation();
     if (e.button === 1 || e.altKey || e.shiftKey) return; // Let canvas handle pan
     setSelectedId(nodeId);
@@ -385,18 +475,16 @@ frame iPhone13:
     currentDelta.current = { x: 0, y: 0 };
   };
 
+  const handleDoubleClickNode = (nodeId: string) => {
+    if (activeTool || !view) return;
+    const node = findNodeById(view.children, nodeId);
+    if (!node || node.kind !== "rect") return;
+    setSelectedId(nodeId);
+    setEditingText({ nodeId, value: String(node.text ?? "") });
+  };
+
   const handleInsertNode = (kind: string) => {
-    if (hasParseErrors) return;
-    try {
-      const id = `${kind}-${Math.floor(Math.random() * 10000)}`;
-      const world = getViewportCenterWorldPoint(camera, window.innerWidth, window.innerHeight);
-      const newNode = createNodeFromRegistry(registry, kind, id, Math.round(world.x), Math.round(world.y));
-      setDocument((prev) => editorMode.type === "component"
-        ? insertNodeIntoComponentInSource(prev, editorMode.componentId, newNode)
-        : insertRootNodeIntoSource(prev, newNode));
-    } catch (e) {
-      console.error("Failed to insert node", e);
-    }
+    setActiveTool((current) => current === kind ? null : kind);
   };
 
   const handlePropertyChange = (property: NodePropertyDefinition, rawValue: string) => {
@@ -442,8 +530,8 @@ frame iPhone13:
     const toNum = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
     const x = toNum(n.x, 0), y = toNum(n.y, 0), w = toNum(n.w, 100), h = toNum(n.h, 24);
     const sw = n.style?.strokeWidth ?? 1;
-    const fill = n.style?.fill ?? (n.kind === "rect" || n.kind === "frame" ? "#fff" : "none");
-    const stroke = n.style?.stroke ?? (n.kind === "flex" ? "none" : "#1e293b22");
+    const fill = n.style?.fill ?? "none";
+    const stroke = n.style?.stroke ?? "none";
     const corner = n.style?.corner ?? 8;
 
     const isSelected = selectedId === n.id;
@@ -466,7 +554,7 @@ frame iPhone13:
       });
       if (!shouldWrap) return <React.Fragment key={n.id}>{rendered}</React.Fragment>;
       return (
-        <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} isSelected={isSelected} isDragging={isDragging} nodeRefs={nodeRefs} onPointerDown={handlePointerDownNode}>
+        <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} disabled={Boolean(activeTool)} isSelected={isSelected} isDragging={isDragging} nodeRefs={nodeRefs} onPointerDown={handlePointerDownNode} onDoubleClick={handleDoubleClickNode}>
           {rendered}
         </NodeWrapper>
       );
@@ -474,11 +562,43 @@ frame iPhone13:
 
     if (n.children?.length) {
       if (!shouldWrap) return <React.Fragment key={n.id}>{n.children.map(renderNode)}</React.Fragment>;
-      return <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} isSelected={isSelected} isDragging={isDragging} nodeRefs={nodeRefs} onPointerDown={handlePointerDownNode}>{n.children.map(renderNode)}</NodeWrapper>;
+      return <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} disabled={Boolean(activeTool)} isSelected={isSelected} isDragging={isDragging} nodeRefs={nodeRefs} onPointerDown={handlePointerDownNode} onDoubleClick={handleDoubleClickNode}>{n.children.map(renderNode)}</NodeWrapper>;
     }
 
     return null;
   };
+
+  const renderDraftShape = () => {
+    if (!draftShape) return null;
+    const bounds = normalizeDraftBounds(draftShape);
+    if (draftShape.kind === "ellipse") return <ellipse cx={bounds.x + bounds.w / 2} cy={bounds.y + bounds.h / 2} rx={bounds.w / 2} ry={bounds.h / 2} fill="#dbeafe88" stroke="#1d4ed8" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />;
+    if (draftShape.kind === "diamond") return <polygon points={`${bounds.x + bounds.w / 2},${bounds.y} ${bounds.x + bounds.w},${bounds.y + bounds.h / 2} ${bounds.x + bounds.w / 2},${bounds.y + bounds.h} ${bounds.x},${bounds.y + bounds.h / 2}`} fill="#dbeafe88" stroke="#1d4ed8" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />;
+    return <rect x={bounds.x} y={bounds.y} width={bounds.w} height={bounds.h} fill="#dbeafe88" stroke="#1d4ed8" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />;
+  };
+
+  const canvasCursor = activeTool ? "crosshair" : "default";
+  const editingNode = editingText && view ? findNodeById(view.children, editingText.nodeId) : null;
+  const textEditorStyle = editingNode ? {
+    position: "absolute",
+    left: camera.x + Number(editingNode.x ?? 0) * camera.z,
+    top: camera.y + Number(editingNode.y ?? 0) * camera.z,
+    width: Math.max(48, Number(editingNode.w ?? 120) * camera.z),
+    height: Math.max(32, Number(editingNode.h ?? 48) * camera.z),
+    padding: `${Math.max(8, 12 * camera.z)}px`,
+    border: "1px solid #a5b4fc",
+    borderRadius: `${Math.max(6, 8 * camera.z)}px`,
+    outline: "none",
+    resize: "none",
+    background: "transparent",
+    color: String(editingNode.style?.text?.color ?? editingNode.style?.stroke ?? "#1f2937"),
+    fontFamily: String(editingNode.style?.text?.font ?? "Inter, sans-serif"),
+    fontSize: Math.max(12, Number(editingNode.style?.text?.size ?? 18) * camera.z),
+    lineHeight: 1.3,
+    textAlign: (editingNode.style?.text?.align ?? "center") as React.CSSProperties["textAlign"],
+    opacity: Math.max(0, Math.min(100, Number(editingNode.style?.text?.opacity ?? 100))) / 100,
+    zIndex: 20,
+    overflow: "hidden",
+  } as React.CSSProperties : null;
 
   const styles: Record<string, React.CSSProperties> = {
     wrap: {
@@ -516,7 +636,9 @@ frame iPhone13:
         <Toolbar
           tools={toolbarTools}
           onInsert={handleInsertNode}
+          activeToolKind={activeTool}
           actions={[
+            { key: "select", label: "↖ Select", active: !activeTool, onClick: () => setActiveTool(null) },
             { key: "code", label: showCode ? "Hide Code" : "Show Code", onClick: () => setShowCode((open) => !open) },
             ...(editorMode.type === "component"
               ? [{ key: "back-document", label: "Back To Document", onClick: () => { setEditorMode({ type: "document" }); setSelectedId(null); } }]
@@ -586,20 +708,41 @@ frame iPhone13:
 
         <input ref={fileInputRef} type="file" accept=".wfml,.txt,text/plain" style={{ display: "none" }} onChange={handleImportWFML} />
 
-        <PropertyInspectorPanel selectedNode={selectedNode} definition={selectedDefinition} onChangeProperty={handlePropertyChange} onChangeInstanceOverride={handleInstanceOverrideChange} />
+        <PropertyInspectorPanel selectedNode={selectedNode} definition={selectedDefinition} editingTextNodeId={editingText?.nodeId ?? null} onChangeProperty={handlePropertyChange} onChangeInstanceOverride={handleInstanceOverrideChange} />
+
+        {editingText && editingNode && textEditorStyle ? (
+          <textarea
+            autoFocus
+            value={editingText.value}
+            onChange={(e) => setEditingText({ nodeId: editingText.nodeId, value: e.target.value })}
+            onBlur={() => commitInlineTextEdit()}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setEditingText(null);
+              }
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                commitInlineTextEdit();
+              }
+            }}
+            style={textEditorStyle}
+          />
+        ) : null}
 
         {!view ? (
           <div style={{ color: "#64748b" }}>No parse result.</div>
         ) : (
-          <CanvasShell camera={camera} isPanning={isPanning} onPointerDown={handlePointerDownCanvas} onPointerMove={handlePointerMoveCanvas} onPointerUp={handlePointerUpCanvas} onPointerLeave={handlePointerUpCanvas} onWheel={handleWheel}>
+          <CanvasShell camera={camera} isPanning={isPanning} cursor={canvasCursor} onPointerDown={handlePointerDownCanvas} onPointerMove={handlePointerMoveCanvas} onPointerUp={handlePointerUpCanvas} onPointerLeave={handlePointerUpCanvas} onWheel={handleWheel}>
             {view.children.map(renderNode)}
+            {renderDraftShape()}
           </CanvasShell>
         )}
 
         <div style={styles.statusBar}>
           <span>{editorMode.type === "component" ? `Mode: Component ${activeComponent?.name || editorMode.componentId}` : "Mode: Document"}</span>
           <span>Zoom {zoomPercent}%</span>
-          <span>{selectedId ? `Selected #${selectedId}` : "No selection"}</span>
+          <span>{selectedId ? `Selected #${selectedId}` : activeTool ? `Tool: ${activeTool}` : "Tool: select"}</span>
           <span>{hasParseErrors ? `${parseErrors.length} parse error(s)` : "WFML valid"}</span>
           <span>Shortcuts: Cmd/Ctrl+Z, D, C, V, E</span>
         </div>

@@ -79,8 +79,10 @@ export interface Style {
   fill?: string;
   stroke?: string;
   strokeWidth?: number;
+  strokeStyle?: "solid" | "dashed" | "dotted";
   dash?: number[];
   corner?: number;
+  edges?: "sharp" | "round";
   shadow?: { blur: number; x: number; y: number; color: string };
   sketch?: boolean;
   roughness?: number;
@@ -92,6 +94,8 @@ export interface TextStyle {
   font?: string;
   size?: number;
   weight?: number;
+  color?: string;
+  opacity?: number;
   align?: "left" | "center" | "right";
   wrap?: boolean;
   autoSize?: boolean;
