@@ -1,19 +1,6 @@
 import type { NodeDefinition } from "../engine/registry";
 
 const IMAGE_PLACEHOLDER = "https://dummyimage.com/100x100/2b59ff/ffffff.png&text=Img";
-const SEMANTIC_ROLE_OPTIONS = [
-  { label: "Auto", value: "" },
-  { label: "Screen", value: "screen" },
-  { label: "Container", value: "container" },
-  { label: "Button", value: "button" },
-  { label: "Input", value: "input" },
-  { label: "Label", value: "label" },
-  { label: "Text", value: "text" },
-  { label: "Connector", value: "connector" },
-  { label: "Note", value: "note" },
-  { label: "Media", value: "media" },
-  { label: "Stack", value: "stack" },
-];
 
 export const primitiveNodeDefinitions: NodeDefinition[] = [
   {
@@ -24,7 +11,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
       { key: "w", label: "Width", type: "number" },
       { key: "h", label: "Height", type: "number" },
       { key: "style.fill", label: "Fill", type: "color" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ x, y, w, h, fill, stroke, strokeWidth, renderChildren }) => (
       <>
@@ -42,7 +29,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
       { key: "h", label: "Height", type: "number" },
       { key: "style.fill", label: "Fill", type: "color" },
       { key: "style.stroke", label: "Stroke", type: "color" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ x, y, w, h, fill, stroke, strokeWidth, corner, renderChildren }) => (
       <>
@@ -60,7 +47,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
       { key: "padding", label: "Padding", type: "number" },
       { key: "direction", label: "Direction", type: "select", options: [{ label: "Column", value: "column" }, { label: "Row", value: "row" }] },
       { key: "style.fill", label: "Fill", type: "color" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ x, y, w, h, fill, stroke, strokeWidth, corner, renderChildren }) => {
       const dash = stroke === "#cbd5e1" ? "4" : "none";
@@ -80,7 +67,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
       { key: "w", label: "Width", type: "number" },
       { key: "h", label: "Height", type: "number" },
       { key: "style.fill", label: "Fill", type: "color" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ x, y, w, h, fill, stroke, strokeWidth, renderChildren }) => (
       <>
@@ -97,7 +84,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
       { key: "w", label: "Width", type: "number" },
       { key: "h", label: "Height", type: "number" },
       { key: "style.fill", label: "Fill", type: "color" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ x, y, w, h, fill, stroke, strokeWidth, renderChildren }) => {
       const pts = `${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`;
@@ -116,7 +103,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
     properties: [
       { key: "text", label: "Text", type: "text" },
       { key: "style.fill", label: "Fill", type: "color" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ node, x, y, w, h, stroke, strokeWidth, corner, renderChildren }) => {
       const rectFill = node.style?.fill ?? "#fef08a";
@@ -135,7 +122,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
     properties: [
       { key: "w", label: "Length", type: "number" },
       { key: "style.stroke", label: "Stroke", type: "color" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ node, x, y, w, h, strokeWidth }) => (
       <line x1={x} y1={y + h / 2} x2={x + w} y2={y + h / 2} stroke={node.style?.stroke ?? "#0f172a"} strokeWidth={strokeWidth} />
@@ -148,7 +135,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
     properties: [
       { key: "text", label: "Text", type: "text" },
       { key: "style.text.size", label: "Size", type: "number" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ node, x, y, w, h }) => {
       const txtSize = node.style?.text?.size ?? 14;
@@ -171,7 +158,7 @@ export const primitiveNodeDefinitions: NodeDefinition[] = [
       { key: "src", label: "Source", type: "text" },
       { key: "w", label: "Width", type: "number" },
       { key: "h", label: "Height", type: "number" },
-      { key: "semantic.role", label: "Semantic Role", type: "select", options: SEMANTIC_ROLE_OPTIONS },
+      { key: "semantic.role", label: "Role", type: "text" },
     ],
     render: ({ node, x, y, w, h }) => <image x={x} y={y} width={w} height={h} href={node.src} preserveAspectRatio="xMidYMid meet" />,
   },

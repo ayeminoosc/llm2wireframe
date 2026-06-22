@@ -20,11 +20,20 @@ export interface Component extends NodeTrivia {
   name: string;
   nodes: Node[];
   props?: Record<string, PropSpec>;
+  semantic?: SemanticMeta;
 }
 
 export interface PropSpec {
-  type: "string" | "number" | "boolean";
+  type: "string" | "number" | "boolean" | "color" | "image";
   default?: any;
+  label?: string;
+  description?: string;
+  bindings?: PropBinding[];
+}
+
+export interface PropBinding {
+  nodeId: string;
+  field: string;
 }
 
 export interface Frame extends NodeBase {

@@ -21,6 +21,7 @@ import type {
   Node,
   NodeTrivia,
   PlacementRule,
+  PropSpec,
   Style,
   WFDocument,
 } from "../wfml-core/ast";
@@ -36,6 +37,7 @@ export type {
   Node,
   NodeTrivia,
   PlacementRule,
+  PropSpec,
   Style,
   WFDocument,
 } from "../wfml-core/ast";
@@ -227,8 +229,65 @@ function parseComponents(C: ParseContext, indent: number, out: Component[]) {
     C.i++;
     const comp: Component = { id: slugify(m[1]), name: m[1].trim(), nodes: [] };
     attachComments(comp, C);
-    parseNodesLike(C, indent + 1, comp.nodes);
+    parseComponentBlock(C, indent + 1, comp);
     out.push(comp);
+  }
+}
+
+function parseComponentBlock(C: ParseContext, indent: number, component: Component) {
+  while (peek(C)) {
+    const tok = peek(C)!;
+    if (!tok.isBlank && !tok.isComment && tok.indent < indent) break;
+    if (tok.isBlank) { C.i++; continue; }
+    if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
+    if (tok.indent !== indent) break;
+
+    if (isHeader(tok, indent, "semantic")) {
+      C.i++;
+      const semantic: any = {};
+      parseKeyValuesInto(C, indent + 1, semantic);
+      component.semantic = semantic;
+      continue;
+    }
+
+    if (isHeader(tok, indent, "props")) {
+      C.i++;
+      const props: Record<string, PropSpec> = {};
+      parsePropsInto(C, indent + 1, props);
+      component.props = props;
+      continue;
+    }
+
+    if (/^([\w-]+)\s+[^:]+:\s*$/.test(tok.text)) {
+      parseNodesLike(C, indent, component.nodes);
+      continue;
+    }
+
+    C.errors.push({ line: tok.lineNo, column: 1, message: `Unexpected component line: "${tok.text}"` });
+    C.i++;
+  }
+}
+
+function parsePropsInto(C: ParseContext, indent: number, out: Record<string, PropSpec>) {
+  while (peek(C)) {
+    const tok = peek(C)!;
+    if (!tok.isBlank && !tok.isComment && tok.indent < indent) break;
+    if (tok.isBlank) { C.i++; continue; }
+    if (tok.isComment) { C.pendingComments.push(stripComment(tok.raw)); C.i++; continue; }
+    if (tok.indent !== indent) break;
+
+    const m = tok.text.match(/^([^:]+):\s*$/);
+    if (!m) {
+      C.errors.push({ line: tok.lineNo, column: 1, message: "Expected a prop header like 'title:'" });
+      C.i++;
+      continue;
+    }
+
+    C.i++;
+    const spec: any = {};
+    attachComments(spec, C);
+    parseKeyValuesInto(C, indent + 1, spec);
+    out[m[1].trim()] = spec;
   }
 }
 
@@ -457,6 +516,8 @@ export function emitWFML(doc: WFDocument, opts: EmitOptions = {}): string {
     for (const c of doc.components) {
       pushComments(c.comments, 1);
       b.push(IND + `component ${c.name}:`);
+      if (c.semantic) emitObjectSection(b, "semantic", c.semantic as any, 2, IND);
+      if (c.props && Object.keys(c.props).length) emitProps(b, c.props, 2, IND);
       for (const n of c.nodes) emitNode(b, n, 2, IND);
     }
     b.push("");
@@ -484,7 +545,7 @@ function emitNode(b: string[], n: Node | Group | Instance, level: number, IND: s
     return;
   }
   b.push(IND.repeat(level) + `${(n as any).kind} ${(n as any).name || (n as any).id}:`);
-  emitNodeBody(b, n as any, level + 1, IND, false);
+  emitNodeBody(b, n as any, level + 1, IND, true);
 }
 
 function emitNodeBody(b: string[], n: any, level: number, IND: string, includeChildren: boolean) {
@@ -504,6 +565,14 @@ function emitNodeBody(b: string[], n: any, level: number, IND: string, includeCh
 function emitObjectSection(b: string[], key: string, obj: Record<string, any>, level: number, IND: string) {
   b.push(IND.repeat(level) + `${key}:`);
   emitObjectKV(b, obj, level + 1, IND);
+}
+
+function emitProps(b: string[], props: Record<string, PropSpec>, level: number, IND: string) {
+  b.push(IND.repeat(level) + `props:`);
+  for (const [name, spec] of Object.entries(props)) {
+    b.push(IND.repeat(level + 1) + `${name}:`);
+    emitObjectKV(b, spec as Record<string, any>, level + 2, IND);
+  }
 }
 
 function emitKV(b: string[], kv: Record<string, any>, level: number, IND: string) {

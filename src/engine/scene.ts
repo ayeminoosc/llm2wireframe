@@ -1,4 +1,6 @@
 import type { PlacementRule } from "../wfml-core/ast";
+import { expandComponentInstance } from "./components";
+import type { PropSpec } from "../wfml-core/ast";
 
 export type ViewerNode = {
   kind: string;
@@ -22,6 +24,17 @@ export type ViewerNode = {
   align?: "start" | "center" | "end" | "stretch";
   justify?: "start" | "center" | "end" | "between";
   padding?: number;
+  semantic?: {
+    role?: string;
+    inferred?: boolean;
+    confidence?: number;
+  };
+  componentName?: string;
+  componentId?: string;
+  componentProps?: Record<string, PropSpec>;
+  overrides?: Record<string, any>;
+  isInstanceRoot?: boolean;
+  instanceRootId?: string;
   children?: ViewerNode[];
 };
 
@@ -82,6 +95,11 @@ export function getSceneBounds(nodes: ViewerNode[]): SceneBounds | null {
 
 export function mapDoc(astDoc: any): ViewerDoc {
   const mapNode = (n: any): ViewerNode => {
+    if (n.kind === "instance") {
+      const expanded = expandComponentInstance(astDoc, n);
+      if (expanded) return mapNode(expanded);
+    }
+
     const mapped: ViewerNode = {
       kind: n.kind,
       id: n.id,
@@ -99,6 +117,13 @@ export function mapDoc(astDoc: any): ViewerDoc {
         text: n.style?.text,
       },
       place: n.place as PlacementRule[] | undefined,
+      semantic: n.semantic,
+      componentName: n.componentName,
+      componentId: n.componentId,
+      componentProps: n.componentProps,
+      overrides: n.overrides,
+      isInstanceRoot: n.isInstanceRoot,
+      instanceRootId: n.instanceRootId,
     };
     if (n.direction) mapped.direction = n.direction;
     if (n.gap !== undefined) mapped.gap = n.gap;

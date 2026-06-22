@@ -47,6 +47,13 @@ function collectIds(nodes: any[], used = new Set<string>()) {
   return used;
 }
 
+function collectComponentIds(components: any[] | undefined, used = new Set<string>()) {
+  for (const component of components || []) {
+    if (component.id) used.add(String(component.id));
+  }
+  return used;
+}
+
 function rekeySubtree(node: any, used: Set<string>) {
   node.id = uniquifyId(slug(node.id || node.kind || "node"), used);
   node.name = node.name ? `${node.name} Copy` : node.name;
@@ -102,6 +109,10 @@ function findNodeContext<T extends { id: string; children?: any[] }>(nodes: T[],
     }
   }
   return null;
+}
+
+function findComponentContext(components: any[] | undefined, componentId: string) {
+  return (components || []).find((component) => component.id === componentId || component.name === componentId) ?? null;
 }
 
 function collectDescendantIds(node: { id: string; children?: any[] }, out = new Set<string>()) {
@@ -361,6 +372,16 @@ function applyDropResolution(doc: any, resolvedView: ViewerDoc, nodeId: string) 
     return true;
   }
 
+  if (astContext.parent) {
+    const movedAstNode = removeNodeFromAst(doc.children, nodeId);
+    if (!movedAstNode) return false;
+    movedAstNode.x = Math.round(Number(draggedView.x ?? movedAstNode.x ?? 0));
+    movedAstNode.y = Math.round(Number(draggedView.y ?? movedAstNode.y ?? 0));
+    movedAstNode.place = undefined;
+    doc.children.push(movedAstNode);
+    return true;
+  }
+
   const astNode: any = astContext.node;
   astNode.x = Math.round(Number(draggedView.x ?? astNode.x ?? 0));
   astNode.y = Math.round(Number(draggedView.y ?? astNode.y ?? 0));
@@ -506,4 +527,158 @@ export function pasteNodeIntoSource(src: string, node: any): { src: string; past
   doc.children.push(copy);
   inferDocumentSemantics(doc);
   return { src: emitWFML(doc), pastedId: copy.id || null };
+}
+
+export function updateInstanceOverrideInSource(src: string, instanceId: string, propName: string, value: any): string {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  if (!doc?.children) return src;
+
+  const updateNode = (nodes: any[]): boolean => {
+    for (const node of nodes) {
+      if (node.id === instanceId && node.kind === "instance") {
+        node.overrides = node.overrides || {};
+        node.overrides[propName] = value;
+        return true;
+      }
+      if (node.children && updateNode(node.children)) return true;
+    }
+    return false;
+  };
+
+  if (!updateNode(doc.children)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function updateComponentNodePropertyInSource(src: string, componentId: string, nodeId: string, propertyPath: string, value: any): string {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  const component = findComponentContext(doc?.components, componentId);
+  if (!component?.nodes) return src;
+
+  const updateNode = (nodes: any[]): boolean => {
+    for (const node of nodes) {
+      if (node.id === nodeId) {
+        setDeepValue(node, propertyPath, value);
+        return true;
+      }
+      if (node.children && updateNode(node.children)) return true;
+    }
+    return false;
+  };
+
+  if (!updateNode(component.nodes)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function deleteComponentNodeFromSource(src: string, componentId: string, nodeId: string): string {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  const component = findComponentContext(doc?.components, componentId);
+  if (!component?.nodes) return src;
+  if (!removeNodeFromAst(component.nodes, nodeId)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function moveComponentNodeInSource(src: string, componentId: string, nodeId: string, dx: number, dy: number): string {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  const component = findComponentContext(doc?.components, componentId);
+  if (!component?.nodes) return src;
+  if (!updateAstNode(component.nodes, nodeId, dx, dy)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function bindComponentNodeFieldToPropInSource(
+  src: string,
+  componentId: string,
+  nodeId: string,
+  fieldPath: string,
+  propName: string,
+  propType: "string" | "number" | "boolean" | "color" | "image",
+): string {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  const component = findComponentContext(doc?.components, componentId);
+  if (!component?.nodes) return src;
+
+  const findNode = (nodes: any[]): any | null => {
+    for (const node of nodes) {
+      if (node.id === nodeId) return node;
+      if (node.children) {
+        const child = findNode(node.children);
+        if (child) return child;
+      }
+    }
+    return null;
+  };
+
+  const getDeepValue = (obj: any, path: string) => path.split(".").reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
+  const node = findNode(component.nodes);
+  if (!node) return src;
+
+  const defaultValue = getDeepValue(node, fieldPath);
+  component.props = component.props || {};
+  component.props[propName] = {
+    ...(component.props[propName] || {}),
+    type: propType,
+    default: defaultValue,
+    label: component.props[propName]?.label || propName,
+    bindings: [{ nodeId, field: fieldPath }],
+  };
+  setDeepValue(node, fieldPath, `$props.${propName}`);
+
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function insertNodeIntoComponentInSource(src: string, componentId: string, node: any): string {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  const component = findComponentContext(doc?.components, componentId);
+  if (!component) return src;
+  component.nodes = component.nodes || [];
+  component.nodes.push(node);
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function createComponentFromNodeInSource(src: string, nodeId: string, componentName: string, semanticRole?: string): { src: string; instanceId: string | null } {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  if (!doc?.children) return { src, instanceId: null };
+
+  const removed = removeNodeFromAst(doc.children, nodeId);
+  if (!removed) return { src, instanceId: null };
+
+  const originX = Math.round(Number(removed.x ?? 0));
+  const originY = Math.round(Number(removed.y ?? 0));
+  shiftAstSubtree(removed, -originX, -originY);
+
+  doc.components = doc.components || [];
+  const componentId = uniquifyId(slug(componentName || removed.id || "component"), collectComponentIds(doc.components));
+  const component: any = {
+    id: componentId,
+    name: componentName,
+    nodes: [removed],
+  };
+  if (semanticRole) component.semantic = { role: semanticRole, inferred: false };
+  doc.components.push(component);
+
+  const usedNodeIds = collectIds(doc.children);
+  const instanceId = uniquifyId(slug(componentName || removed.id || "instance"), usedNodeIds);
+  doc.children.push({
+    kind: "instance",
+    id: instanceId,
+    of: componentName,
+    x: originX,
+    y: originY,
+  });
+
+  inferDocumentSemantics(doc);
+  return { src: emitWFML(doc), instanceId };
 }

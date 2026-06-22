@@ -12,12 +12,18 @@ export function layoutDoc(doc: ViewerDoc): ViewerDoc {
     parentH: number,
     parentX = 0,
     parentY = 0,
+    parentNode?: ViewerNode,
   ) => {
     const idx = Object.fromEntries(siblings.map((n) => [n.id, n]));
+    const getRefNode = (ref?: string) => {
+      if (!ref) return undefined;
+      if (parentNode && ref === parentNode.id) return parentNode;
+      return idx[ref];
+    };
     if (!node.place) return;
     for (const r of node.place) {
       if (r.type === "centered") {
-        const ref = r.ref ? idx[r.ref] : undefined;
+        const ref = getRefNode(r.ref);
         const bx = ref ? (ref.x || 0) : parentX;
         const by = ref ? (ref.y || 0) : parentY;
         const bw = ref ? (Number(ref.w) || parentW) : parentW;
@@ -27,41 +33,41 @@ export function layoutDoc(doc: ViewerDoc): ViewerDoc {
         continue;
       }
       if (r.type === "centerX") {
-        const ref = r.ref ? idx[r.ref] : undefined;
+        const ref = getRefNode(r.ref);
         const bx = ref ? (ref.x || 0) : parentX;
         const bw = ref ? (Number(ref.w) || parentW) : parentW;
         node.x = bx + (bw - (Number(node.w) || 0)) / 2;
         continue;
       }
       if (r.type === "centerY") {
-        const ref = r.ref ? idx[r.ref] : undefined;
+        const ref = getRefNode(r.ref);
         const by = ref ? (ref.y || 0) : parentY;
         const bh = ref ? (Number(ref.h) || parentH) : parentH;
         node.y = by + (bh - (Number(node.h) || 0)) / 2;
         continue;
       }
       if (r.type === "below") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         if (ref) node.y = (ref.y || 0) + (Number(ref.h) || 0) + (r.by || 0);
         continue;
       }
       if (r.type === "above") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         if (ref) node.y = (ref.y || 0) - (Number(node.h) || 0) - (r.by || 0);
         continue;
       }
       if (r.type === "rightOf") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         if (ref) node.x = (ref.x || 0) + (Number(ref.w) || 0) + (r.by || 0);
         continue;
       }
       if (r.type === "leftOf") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         if (ref) node.x = (ref.x || 0) - (Number(node.w) || 0) - (r.by || 0);
         continue;
       }
       if (r.type === "inside") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         const inset = r.inset;
         const t = Array.isArray(inset) ? inset : inset !== undefined ? [inset, inset, inset, inset] : [0, 0, 0, 0];
         const bx = ref ? (ref.x || 0) : parentX;
@@ -73,28 +79,28 @@ export function layoutDoc(doc: ViewerDoc): ViewerDoc {
         continue;
       }
       if (r.type === "alignLeft") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         if (ref) node.x = ref.x || 0;
         continue;
       }
       if (r.type === "alignRight") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         if (ref) node.x = (ref.x || 0) + (Number(ref.w) || 0) - (Number(node.w) || 0);
         continue;
       }
       if (r.type === "alignTop") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         if (ref) node.y = ref.y || 0;
         continue;
       }
       if (r.type === "alignBottom") {
-        const ref = idx[r.ref];
+        const ref = getRefNode(r.ref);
         if (ref) node.y = (ref.y || 0) + (Number(ref.h) || 0) - (Number(node.h) || 0);
       }
     }
   };
 
-  const layoutNode = (node: ViewerNode, siblings: ViewerNode[], parentX: number, parentY: number, parentW: number, parentH: number) => {
+  const layoutNode = (node: ViewerNode, siblings: ViewerNode[], parentX: number, parentY: number, parentW: number, parentH: number, parentNode?: ViewerNode) => {
     if (node.kind === "text") {
       const size = node.style?.text?.size ?? 14;
       node.w = node.w ?? Math.max(80, (node.text?.length || 1) * (size * 0.6) + 16);
@@ -112,7 +118,7 @@ export function layoutDoc(doc: ViewerDoc): ViewerDoc {
       node.h = node.h ?? 2;
     }
 
-    resolvePlace(node, siblings, parentW, parentH, parentX, parentY);
+    resolvePlace(node, siblings, parentW, parentH, parentX, parentY, parentNode);
 
     if (node.x === undefined) node.x = parentX + 16;
     if (node.y === undefined) node.y = parentY + 16;
@@ -136,7 +142,7 @@ export function layoutDoc(doc: ViewerDoc): ViewerDoc {
 
         const availableW = Number.isFinite(Number(node.w)) ? Number(node.w) : parentW;
         const availableH = Number.isFinite(Number(node.h)) ? Number(node.h) : parentH;
-        layoutNode(child, node.children, child.x ?? cx, child.y ?? cy, Math.max(0, availableW - pad * 2), Math.max(0, availableH));
+        layoutNode(child, node.children, child.x ?? cx, child.y ?? cy, Math.max(0, availableW - pad * 2), Math.max(0, availableH), node);
 
         if (!child.place || child.place.length === 0) {
           if (isCol) {
@@ -155,7 +161,7 @@ export function layoutDoc(doc: ViewerDoc): ViewerDoc {
     }
 
     for (const child of node.children) {
-      layoutNode(child, node.children, node.x, node.y, Number(node.w), Number(node.h));
+      layoutNode(child, node.children, node.x, node.y, Number(node.w), Number(node.h), node);
     }
   };
 

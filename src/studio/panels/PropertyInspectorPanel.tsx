@@ -6,21 +6,48 @@ type Props = {
   selectedNode: ViewerNode | null;
   definition?: NodeDefinition;
   onChangeProperty: (property: NodePropertyDefinition, rawValue: string) => void;
+  onChangeInstanceOverride: (propName: string, rawValue: string) => void;
 };
 
 function getDeepValue(obj: any, path: string): any {
   return path.split(".").reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
 }
 
-export function PropertyInspectorPanel({ selectedNode, definition, onChangeProperty }: Props) {
+export function PropertyInspectorPanel({ selectedNode, definition, onChangeProperty, onChangeInstanceOverride }: Props) {
   const properties = definition?.properties || [];
+  const instanceProps = selectedNode?.isInstanceRoot ? Object.entries(selectedNode.componentProps || {}) : [];
+  const isInstance = Boolean(selectedNode?.isInstanceRoot);
 
   return (
     <div style={styles.panel}>
       <div style={styles.header}>Properties</div>
       {!selectedNode ? <div style={styles.empty}>Select a node to inspect it.</div> : null}
-      {selectedNode && properties.length === 0 ? <div style={styles.empty}>No editable properties for `{selectedNode.kind}` yet.</div> : null}
-      {selectedNode && properties.length > 0 ? (
+      {selectedNode && !isInstance && properties.length === 0 ? <div style={styles.empty}>No editable properties for `{selectedNode.kind}` yet.</div> : null}
+      {selectedNode && isInstance ? (
+        <div style={styles.form}>
+          <div style={styles.kindRow}>component `{selectedNode.componentName}`</div>
+          {selectedNode.semantic?.role ? <div style={styles.roleRow}>Role: {selectedNode.semantic.role}</div> : null}
+          {instanceProps.length === 0 ? <div style={styles.emptyInline}>No exposed props yet.</div> : null}
+          {instanceProps.map(([propName, spec]) => {
+            const value = selectedNode.overrides && propName in selectedNode.overrides
+              ? selectedNode.overrides[propName]
+              : spec.default;
+            const inputType = spec.type === "number" ? "number" : spec.type === "color" ? "color" : "text";
+            return (
+              <label key={propName} style={styles.field}>
+                <span style={styles.label}>{spec.label || propName}</span>
+                <input
+                  type={inputType}
+                  value={inputType === "color" ? String(value ?? "#000000") : String(value ?? "")}
+                  onChange={(e) => onChangeInstanceOverride(propName, e.target.value)}
+                  style={styles.input}
+                />
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
+      {selectedNode && !isInstance && properties.length > 0 ? (
         <div style={styles.form}>
           <div style={styles.kindRow}>{selectedNode.kind} `#{selectedNode.id}`</div>
           {properties.map((property) => {
@@ -75,6 +102,10 @@ const styles = {
     color: "#64748b",
     fontSize: 13,
   } as React.CSSProperties,
+  emptyInline: {
+    color: "#64748b",
+    fontSize: 13,
+  } as React.CSSProperties,
   form: {
     display: "flex",
     flexDirection: "column",
@@ -85,6 +116,11 @@ const styles = {
     fontSize: 12,
     color: "#475569",
     fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+  } as React.CSSProperties,
+  roleRow: {
+    fontSize: 12,
+    color: "#334155",
+    fontWeight: 600,
   } as React.CSSProperties,
   field: {
     display: "flex",

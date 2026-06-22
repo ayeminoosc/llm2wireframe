@@ -1,7 +1,7 @@
 // src/components/WFMLReactViewerInline.tsx
 import React, { useEffect, useMemo, useState, useRef } from "react";
 
-import { applyDragToView, copyNodeFromSource, deleteNodeFromSource, duplicateNodeInSource, insertRootNodeIntoSource, pasteNodeIntoSource, resolveDragToSource, updateNodePropertyInSource } from "../engine/commands";
+import { applyDragToView, bindComponentNodeFieldToPropInSource, copyNodeFromSource, createComponentFromNodeInSource, deleteComponentNodeFromSource, deleteNodeFromSource, duplicateNodeInSource, insertNodeIntoComponentInSource, insertRootNodeIntoSource, moveComponentNodeInSource, pasteNodeIntoSource, resolveDragToSource, updateComponentNodePropertyInSource, updateInstanceOverrideInSource, updateNodePropertyInSource } from "../engine/commands";
 import { createDefaultCamera, fitCameraToBounds, getViewportCenterWorldPoint, panCamera, scrollCamera, zoomCameraAtPoint, type Camera } from "../engine/camera";
 import { layoutDoc } from "../engine/layout";
 import { createNodeFromRegistry, createNodeRegistry, getToolDefinitions, type NodePropertyDefinition } from "../engine/registry";
@@ -22,6 +22,8 @@ export default function WFMLReactViewerInline({
   initialText,
   height = "100vh",
 }: { initialText?: string; height?: number | string }) {
+  type EditorMode = { type: "document" } | { type: "component"; componentId: string };
+
   const SAMPLE = initialText ?? `meta:
   version: 0.1
   author: you
@@ -95,9 +97,11 @@ frame iPhone13:
   const [parseErrors, setParseErrors] = useState<any[]>([]);
   const parsed = useMemo(() => parseWFML(src), [src]);
   const [view, setView] = useState<ViewerDoc | null>(null);
+  const parsedDoc = (parsed as any).doc;
   
   // Interactive state
   const [showCode, setShowCode] = useState(false);
+  const [editorMode, setEditorMode] = useState<EditorMode>({ type: "document" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   
@@ -108,8 +112,12 @@ frame iPhone13:
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const registry = useMemo(() => createNodeRegistry(primitiveNodeDefinitions), []);
   const toolbarTools = useMemo(() => getToolDefinitions(registry), [registry]);
+  const activeComponent = useMemo(() => {
+    if (editorMode.type !== "component") return null;
+    return parsedDoc?.components?.find((component: any) => component.id === editorMode.componentId) ?? null;
+  }, [editorMode, parsedDoc]);
   const selectedNode = useMemo(() => (view ? findNodeById(view.children, selectedId) : null), [view, selectedId]);
-  const selectedDefinition = useMemo(() => (selectedNode ? registry.get(selectedNode.kind) : undefined), [registry, selectedNode]);
+  const selectedDefinition = useMemo(() => (selectedNode && !selectedNode.isInstanceRoot ? registry.get(selectedNode.kind) : undefined), [registry, selectedNode]);
   const hasParseErrors = parseErrors.length > 0;
 
   const nodeRefs = useRef<Record<string, SVGGElement | null>>({});
@@ -169,7 +177,9 @@ frame iPhone13:
         const step = event.shiftKey ? 10 : 1;
         const dx = event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0;
         const dy = event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0;
-        setDocument((prev) => resolveDragToSource(prev, view, selectedId, dx, dy));
+        setDocument((prev) => editorMode.type === "component"
+          ? moveComponentNodeInSource(prev, editorMode.componentId, selectedId, dx, dy)
+          : resolveDragToSource(prev, view, selectedId, dx, dy));
         return;
       }
       if (event.key === "Escape") {
@@ -207,21 +217,33 @@ frame iPhone13:
       if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
         if (hasParseErrors) return;
         event.preventDefault();
-        setDocument((prev) => deleteNodeFromSource(prev, selectedId));
+        setDocument((prev) => editorMode.type === "component"
+          ? deleteComponentNodeFromSource(prev, editorMode.componentId, selectedId)
+          : deleteNodeFromSource(prev, selectedId));
         setSelectedId(null);
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [hasParseErrors, redo, selectedId, setDocument, src, undo, view]);
+  }, [editorMode, hasParseErrors, redo, selectedId, setDocument, src, undo, view]);
 
   useEffect(() => {
     const { doc, errors } = parsed as any;
     setParseErrors(errors || []);
     if (!doc) { setView(null); return; }
+    if (editorMode.type === "component") {
+      const component = doc.components?.find((entry: any) => entry.id === editorMode.componentId);
+      if (!component) {
+        setEditorMode({ type: "document" });
+        setView(layoutDoc(mapDoc(doc)));
+        return;
+      }
+      setView(layoutDoc(mapDoc({ ...doc, children: component.nodes || [] })));
+      return;
+    }
     setView(layoutDoc(mapDoc(doc)));
-  }, [parsed]);
+  }, [editorMode, parsed]);
 
   useEffect(() => {
     if (selectedId && !selectedNode) {
@@ -334,7 +356,9 @@ frame iPhone13:
     
     if (dx !== 0 || dy !== 0) {
       if (hasParseErrors) return;
-      setDocument((prev) => resolveDragToSource(prev, view, idToUpdate, dx, dy));
+      setDocument((prev) => editorMode.type === "component"
+        ? moveComponentNodeInSource(prev, editorMode.componentId, idToUpdate, dx, dy)
+        : resolveDragToSource(prev, view, idToUpdate, dx, dy));
     }
   };
 
@@ -367,7 +391,9 @@ frame iPhone13:
       const id = `${kind}-${Math.floor(Math.random() * 10000)}`;
       const world = getViewportCenterWorldPoint(camera, window.innerWidth, window.innerHeight);
       const newNode = createNodeFromRegistry(registry, kind, id, Math.round(world.x), Math.round(world.y));
-      setDocument((prev) => insertRootNodeIntoSource(prev, newNode));
+      setDocument((prev) => editorMode.type === "component"
+        ? insertNodeIntoComponentInSource(prev, editorMode.componentId, newNode)
+        : insertRootNodeIntoSource(prev, newNode));
     } catch (e) {
       console.error("Failed to insert node", e);
     }
@@ -377,7 +403,39 @@ frame iPhone13:
     if (hasParseErrors) return;
     if (!selectedId) return;
     const value = property.type === "number" ? (rawValue === "" ? 0 : Number(rawValue)) : rawValue;
-    setDocument((prev) => updateNodePropertyInSource(prev, selectedId, property.key, value));
+    setDocument((prev) => editorMode.type === "component"
+      ? updateComponentNodePropertyInSource(prev, editorMode.componentId, selectedId, property.key, value)
+      : updateNodePropertyInSource(prev, selectedId, property.key, value));
+  };
+
+  const handleInstanceOverrideChange = (propName: string, rawValue: string) => {
+    if (hasParseErrors || !selectedNode?.isInstanceRoot || !selectedId) return;
+    const spec = selectedNode.componentProps?.[propName];
+    const value = spec?.type === "number" ? (rawValue === "" ? 0 : Number(rawValue)) : rawValue;
+    setDocument((prev) => updateInstanceOverrideInSource(prev, selectedId, propName, value));
+  };
+
+  const handleExposeSelectedAsProp = () => {
+    if (editorMode.type !== "component" || !selectedNode || typeof window === "undefined") return;
+
+    let fieldPath: string | null = null;
+    let propType: "string" | "number" | "boolean" | "color" | "image" = "string";
+    if (selectedNode.kind === "text" || selectedNode.kind === "sticky") {
+      fieldPath = "text";
+      propType = "string";
+    } else if (selectedNode.kind === "image") {
+      fieldPath = "src";
+      propType = "image";
+    } else if (selectedNode.style?.fill !== undefined) {
+      fieldPath = "style.fill";
+      propType = "color";
+    }
+
+    if (!fieldPath) return;
+    const suggested = selectedNode.kind === "text" ? "title" : selectedNode.kind === "image" ? "imageSrc" : "fillColor";
+    const propName = window.prompt("Expose as prop", suggested)?.trim();
+    if (!propName) return;
+    setDocument((prev) => bindComponentNodeFieldToPropInSource(prev, editorMode.componentId, selectedNode.id, fieldPath!, propName, propType));
   };
 
   const renderNode = (n: ViewerNode): React.ReactNode => {
@@ -390,28 +448,32 @@ frame iPhone13:
 
     const isSelected = selectedId === n.id;
     const isDragging = draggingId === n.id;
+    const shouldWrap = !n.instanceRootId || n.isInstanceRoot;
 
     const definition = registry.get(n.kind);
     if (definition?.render) {
+      const rendered = definition.render({
+        node: n,
+        x,
+        y,
+        w,
+        h,
+        fill,
+        stroke,
+        strokeWidth: sw,
+        corner,
+        renderChildren: () => <>{n.children?.map(renderNode)}</>,
+      });
+      if (!shouldWrap) return <React.Fragment key={n.id}>{rendered}</React.Fragment>;
       return (
         <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} isSelected={isSelected} isDragging={isDragging} nodeRefs={nodeRefs} onPointerDown={handlePointerDownNode}>
-          {definition.render({
-            node: n,
-            x,
-            y,
-            w,
-            h,
-            fill,
-            stroke,
-            strokeWidth: sw,
-            corner,
-            renderChildren: () => <>{n.children?.map(renderNode)}</>,
-          })}
+          {rendered}
         </NodeWrapper>
       );
     }
 
     if (n.children?.length) {
+      if (!shouldWrap) return <React.Fragment key={n.id}>{n.children.map(renderNode)}</React.Fragment>;
       return <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} isSelected={isSelected} isDragging={isDragging} nodeRefs={nodeRefs} onPointerDown={handlePointerDownNode}>{n.children.map(renderNode)}</NodeWrapper>;
     }
 
@@ -420,12 +482,10 @@ frame iPhone13:
 
   const styles: Record<string, React.CSSProperties> = {
     wrap: {
-      width: "100vw", height: "100vh", position: "fixed", top: 0, left: 0,
-      background: "#f5f6fa", overflow: "hidden", fontFamily: "sans-serif"
+      width: "100vw", height: "100vh", display: "flex", overflow: "hidden", fontFamily: "sans-serif",
     },
-    floatingBtn: {
-      position: "absolute", top: 24, right: 24, zIndex: 10,
-      padding: "8px 16px", borderRadius: 8, border: "none", background: "#2B59FF", color: "#fff", cursor: "pointer", fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+    canvasArea: {
+      flex: 1, position: "relative", minWidth: 0, background: "#f5f6fa",
     },
     statusBar: {
       position: "absolute",
@@ -450,81 +510,99 @@ frame iPhone13:
 
   return (
     <div style={styles.wrap}>
-      <Toolbar
-        tools={toolbarTools}
-        onInsert={handleInsertNode}
-        actions={[
-          { key: "undo", label: "Undo", disabled: !canUndo, onClick: undo },
-          { key: "redo", label: "Redo", disabled: !canRedo, onClick: redo },
-          { key: "zoom-out", label: "Zoom -", onClick: () => zoomBy(0.9) },
-          { key: "zoom-in", label: "Zoom +", onClick: () => zoomBy(1.1) },
-          { key: "copy", label: "Copy", disabled: !selectedId || hasParseErrors, onClick: () => {
-            if (!selectedId) return;
-            clipboardRef.current = copyNodeFromSource(src, selectedId);
-          } },
-          { key: "paste", label: "Paste", disabled: !clipboardRef.current || hasParseErrors, onClick: () => {
-            if (!clipboardRef.current) return;
-            setDocument((prev) => {
-              const result = pasteNodeIntoSource(prev, clipboardRef.current);
-              if (result.pastedId) setSelectedId(result.pastedId);
-              return result.src;
-            });
-          } },
-          { key: "duplicate", label: "Duplicate", disabled: !selectedId || hasParseErrors, onClick: () => {
-            if (!selectedId) return;
-            setDocument((prev) => {
-              const result = duplicateNodeInSource(prev, selectedId);
-              if (result.duplicatedId) setSelectedId(result.duplicatedId);
-              return result.src;
-            });
-          } },
-          { key: "delete", label: "Delete", disabled: !selectedId || hasParseErrors, onClick: () => {
-            if (!selectedId) return;
-            setDocument((prev) => deleteNodeFromSource(prev, selectedId));
-            setSelectedId(null);
-          } },
-          { key: "focus-selected", label: "Focus Selected", disabled: !selectedNode, onClick: focusSelectedNode },
-          { key: "reset-view", label: "Reset View", onClick: () => setCamera(createDefaultCamera()) },
-          { key: "fit-view", label: "Fit View", disabled: !view, onClick: fitViewToScene },
-          { key: "import", label: "Import", onClick: () => fileInputRef.current?.click() },
-          { key: "export", label: "Export", onClick: handleDownloadWFML },
-          { key: "new", label: "New", onClick: () => {
-            setSelectedId(null);
-            setDraggingId(null);
-            clipboardRef.current = null;
-            setCamera(createDefaultCamera());
-            setDocument(SAMPLE);
-          } },
-          { key: "code", label: showCode ? "Hide Code" : "Show Code", onClick: () => setShowCode((open) => !open) },
-        ]}
-      />
+      <CodeEditorPanel open={showCode} src={src} errors={parseErrors} onChangeSrc={setDocument} onClose={() => setShowCode(false)} onRebuild={rebuild} onToggle={() => setShowCode((v) => !v)} />
 
-      {/* Floating Action Button for Code */}
-      {!showCode && (
-        <button style={styles.floatingBtn} onClick={() => setShowCode(true)}>
-          {`</> Edit WFML`}
-        </button>
-      )}
+      <div style={styles.canvasArea}>
+        <Toolbar
+          tools={toolbarTools}
+          onInsert={handleInsertNode}
+          actions={[
+            { key: "code", label: showCode ? "Hide Code" : "Show Code", onClick: () => setShowCode((open) => !open) },
+            ...(editorMode.type === "component"
+              ? [{ key: "back-document", label: "Back To Document", onClick: () => { setEditorMode({ type: "document" }); setSelectedId(null); } }]
+              : []),
+            { key: "undo", label: "Undo", disabled: !canUndo, onClick: undo },
+            { key: "redo", label: "Redo", disabled: !canRedo, onClick: redo },
+            { key: "zoom-out", label: "Zoom -", onClick: () => zoomBy(0.9) },
+            { key: "zoom-in", label: "Zoom +", onClick: () => zoomBy(1.1) },
+            { key: "copy", label: "Copy", disabled: !selectedId || hasParseErrors, onClick: () => {
+              if (!selectedId) return;
+              clipboardRef.current = copyNodeFromSource(src, selectedId);
+            } },
+            { key: "paste", label: "Paste", disabled: !clipboardRef.current || hasParseErrors, onClick: () => {
+              if (!clipboardRef.current) return;
+              setDocument((prev) => {
+                const result = pasteNodeIntoSource(prev, clipboardRef.current);
+                if (result.pastedId) setSelectedId(result.pastedId);
+                return result.src;
+              });
+            } },
+            { key: "duplicate", label: "Duplicate", disabled: !selectedId || hasParseErrors, onClick: () => {
+              if (!selectedId) return;
+              setDocument((prev) => {
+                const result = duplicateNodeInSource(prev, selectedId);
+                if (result.duplicatedId) setSelectedId(result.duplicatedId);
+                return result.src;
+              });
+            } },
+            { key: "delete", label: "Delete", disabled: !selectedId || hasParseErrors, onClick: () => {
+              if (!selectedId) return;
+              setDocument((prev) => editorMode.type === "component"
+                ? deleteComponentNodeFromSource(prev, editorMode.componentId, selectedId)
+                : deleteNodeFromSource(prev, selectedId));
+              setSelectedId(null);
+            } },
+            { key: "create-component", label: "Create Component", disabled: editorMode.type === "component" || !selectedId || hasParseErrors, onClick: () => {
+              if (!selectedId || typeof window === "undefined") return;
+              const componentName = window.prompt("Component name", "NewComponent")?.trim();
+              if (!componentName) return;
+              const semanticRole = window.prompt("Component role (optional)", "")?.trim() || undefined;
+              setDocument((prev) => {
+                const result = createComponentFromNodeInSource(prev, selectedId, componentName, semanticRole);
+                if (result.instanceId) setSelectedId(result.instanceId);
+                return result.src;
+              });
+            } },
+            { key: "edit-component", label: "Edit Component", disabled: editorMode.type === "component" || !selectedNode?.isInstanceRoot || !selectedNode.componentId, onClick: () => {
+              if (!selectedNode?.componentId) return;
+              setEditorMode({ type: "component", componentId: selectedNode.componentId });
+              setSelectedId(null);
+            } },
+            { key: "expose-prop", label: "Expose Prop", disabled: editorMode.type !== "component" || !selectedNode || (!(["text", "sticky", "image"].includes(selectedNode.kind)) && selectedNode.style?.fill === undefined), onClick: handleExposeSelectedAsProp },
+            { key: "focus-selected", label: "Focus Selected", disabled: !selectedNode, onClick: focusSelectedNode },
+            { key: "reset-view", label: "Reset View", onClick: () => setCamera(createDefaultCamera()) },
+            { key: "fit-view", label: "Fit View", disabled: !view, onClick: fitViewToScene },
+            { key: "import", label: "Import", onClick: () => fileInputRef.current?.click() },
+            { key: "export", label: "Export", onClick: handleDownloadWFML },
+            { key: "new", label: "New", onClick: () => {
+              setSelectedId(null);
+              setDraggingId(null);
+              clipboardRef.current = null;
+              setCamera(createDefaultCamera());
+              setDocument(SAMPLE);
+            } },
+          ]}
+        />
 
-      <input ref={fileInputRef} type="file" accept=".wfml,.txt,text/plain" style={{ display: "none" }} onChange={handleImportWFML} />
+        <input ref={fileInputRef} type="file" accept=".wfml,.txt,text/plain" style={{ display: "none" }} onChange={handleImportWFML} />
 
-      <PropertyInspectorPanel selectedNode={selectedNode} definition={selectedDefinition} onChangeProperty={handlePropertyChange} />
+        <PropertyInspectorPanel selectedNode={selectedNode} definition={selectedDefinition} onChangeProperty={handlePropertyChange} onChangeInstanceOverride={handleInstanceOverrideChange} />
 
-      <CodeEditorPanel open={showCode} src={src} errors={parseErrors} onChangeSrc={setDocument} onClose={() => setShowCode(false)} onRebuild={rebuild} />
+        {!view ? (
+          <div style={{ color: "#64748b" }}>No parse result.</div>
+        ) : (
+          <CanvasShell camera={camera} isPanning={isPanning} onPointerDown={handlePointerDownCanvas} onPointerMove={handlePointerMoveCanvas} onPointerUp={handlePointerUpCanvas} onPointerLeave={handlePointerUpCanvas} onWheel={handleWheel}>
+            {view.children.map(renderNode)}
+          </CanvasShell>
+        )}
 
-      {!view ? (
-        <div style={{ color: "#64748b" }}>No parse result.</div>
-      ) : (
-        <CanvasShell camera={camera} isPanning={isPanning} onPointerDown={handlePointerDownCanvas} onPointerMove={handlePointerMoveCanvas} onPointerUp={handlePointerUpCanvas} onPointerLeave={handlePointerUpCanvas} onWheel={handleWheel}>
-          {view.children.map(renderNode)}
-        </CanvasShell>
-      )}
-
-      <div style={styles.statusBar}>
-        <span>Zoom {zoomPercent}%</span>
-        <span>{selectedId ? `Selected #${selectedId}` : "No selection"}</span>
-        <span>{hasParseErrors ? `${parseErrors.length} parse error(s)` : "WFML valid"}</span>
-        <span>Shortcuts: Cmd/Ctrl+Z, D, C, V, E</span>
+        <div style={styles.statusBar}>
+          <span>{editorMode.type === "component" ? `Mode: Component ${activeComponent?.name || editorMode.componentId}` : "Mode: Document"}</span>
+          <span>Zoom {zoomPercent}%</span>
+          <span>{selectedId ? `Selected #${selectedId}` : "No selection"}</span>
+          <span>{hasParseErrors ? `${parseErrors.length} parse error(s)` : "WFML valid"}</span>
+          <span>Shortcuts: Cmd/Ctrl+Z, D, C, V, E</span>
+        </div>
       </div>
     </div>
   );
