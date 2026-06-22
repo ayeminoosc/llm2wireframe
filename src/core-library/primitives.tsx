@@ -67,6 +67,7 @@ const RECT_STYLE_PROPERTIES: NodePropertyDefinition[] = [
   { key: "style.roughness", label: "Sloppiness", type: "buttonGroup", group: "Sloppiness", options: SLOPPINESS_OPTIONS },
   { key: "style.edges", label: "Edges", type: "buttonGroup", group: "Edges", options: EDGES_OPTIONS },
   { key: "opacity", label: "Opacity", type: "slider", group: "Opacity", min: 0, max: 100, step: 1 },
+  { key: "rotation", label: "Rotation", type: "number", group: "Transform" },
 ];
 
 const SHAPE_STYLE_PROPERTIES: NodePropertyDefinition[] = [
@@ -76,6 +77,7 @@ const SHAPE_STYLE_PROPERTIES: NodePropertyDefinition[] = [
   { key: "style.strokeStyle", label: "Stroke style", type: "buttonGroup", group: "Stroke style", options: STROKE_STYLE_OPTIONS },
   { key: "style.roughness", label: "Sloppiness", type: "buttonGroup", group: "Sloppiness", options: SLOPPINESS_OPTIONS },
   { key: "opacity", label: "Opacity", type: "slider", group: "Opacity", min: 0, max: 100, step: 1 },
+  { key: "rotation", label: "Rotation", type: "number", group: "Transform" },
 ];
 
 const SIZE_PROPERTIES: NodePropertyDefinition[] = [

@@ -17,6 +17,7 @@ import { PropertyInspectorPanel } from "../studio/panels/PropertyInspectorPanel"
 
 const STORAGE_KEY = "llm2wireframe.wfml";
 const CAMERA_STORAGE_KEY = "llm2wireframe.camera";
+const SNAP_THRESHOLD = 5; // pixels
 
 export default function WFMLReactViewerInline({
   initialText,
@@ -32,6 +33,7 @@ export default function WFMLReactViewerInline({
   type SelectionBox = { startX: number; startY: number; currentX: number; currentY: number; additive: boolean };
   type RotationState = { nodeId: string; startAngle: number; center: { x: number; y: number }; originalRotation: number };
   type LassoState = { points: [number, number][] };
+  type SnapGuide = { type: "horizontal" | "vertical"; position: number };
 
   const SAMPLE = initialText ?? `meta:
   version: 0.1
@@ -124,6 +126,7 @@ frame iPhone13:
   const [editingText, setEditingText] = useState<EditingText | null>(null);
   const [rotationState, setRotationState] = useState<RotationState | null>(null);
   const [lassoState, setLassoState] = useState<LassoState | null>(null);
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
 
   // Camera State
   const [camera, setCamera] = useState<Camera>(createDefaultCamera());
@@ -141,6 +144,7 @@ frame iPhone13:
   const hasParseErrors = parseErrors.length > 0;
 
   const nodeRefs = useRef<Record<string, SVGGElement | null>>({});
+  const rotatedGroupRefs = useRef<Record<string, SVGGElement | null>>({});
   const dragStartPos = useRef({ x: 0, y: 0 });
   const currentDelta = useRef({ x: 0, y: 0 });
 
@@ -371,6 +375,72 @@ frame iPhone13:
     return ids;
   };
 
+  const computeSnapGuides = (draggingNodeId: string, candidateX: number, candidateY: number, candidateW: number, candidateH: number) => {
+    if (!view) return [];
+    const guides: SnapGuide[] = [];
+    const candidateEdges = {
+      left: candidateX,
+      right: candidateX + candidateW,
+      top: candidateY,
+      bottom: candidateY + candidateH,
+      centerH: candidateY + candidateH / 2,
+      centerV: candidateX + candidateW / 2,
+    };
+
+    const visit = (nodes: ViewerNode[]) => {
+      for (const node of nodes) {
+        if (node.id === draggingNodeId || node.isInstanceRoot) continue;
+        const nx = Number(node.x ?? 0), ny = Number(node.y ?? 0);
+        const nw = Number(node.w ?? 0), nh = Number(node.h ?? 0);
+        const targetEdges = {
+          left: nx,
+          right: nx + nw,
+          top: ny,
+          bottom: ny + nh,
+          centerH: ny + nh / 2,
+          centerV: nx + nw / 2,
+        };
+
+        // Horizontal alignment (left, right, centerV)
+        if (Math.abs(candidateEdges.left - targetEdges.left) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.left });
+        else if (Math.abs(candidateEdges.left - targetEdges.right) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.right });
+        else if (Math.abs(candidateEdges.left - targetEdges.centerV) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.centerV });
+
+        if (Math.abs(candidateEdges.right - targetEdges.left) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.left });
+        else if (Math.abs(candidateEdges.right - targetEdges.right) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.right });
+        else if (Math.abs(candidateEdges.right - targetEdges.centerV) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.centerV });
+
+        if (Math.abs(candidateEdges.centerV - targetEdges.left) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.left });
+        else if (Math.abs(candidateEdges.centerV - targetEdges.right) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.right });
+        else if (Math.abs(candidateEdges.centerV - targetEdges.centerV) < SNAP_THRESHOLD) guides.push({ type: "vertical", position: targetEdges.centerV });
+
+        // Vertical alignment (top, bottom, centerH)
+        if (Math.abs(candidateEdges.top - targetEdges.top) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.top });
+        else if (Math.abs(candidateEdges.top - targetEdges.bottom) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.bottom });
+        else if (Math.abs(candidateEdges.top - targetEdges.centerH) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.centerH });
+
+        if (Math.abs(candidateEdges.bottom - targetEdges.top) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.top });
+        else if (Math.abs(candidateEdges.bottom - targetEdges.bottom) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.bottom });
+        else if (Math.abs(candidateEdges.bottom - targetEdges.centerH) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.centerH });
+
+        if (Math.abs(candidateEdges.centerH - targetEdges.top) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.top });
+        else if (Math.abs(candidateEdges.centerH - targetEdges.bottom) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.bottom });
+        else if (Math.abs(candidateEdges.centerH - targetEdges.centerH) < SNAP_THRESHOLD) guides.push({ type: "horizontal", position: targetEdges.centerH });
+
+        if (node.children?.length) visit(node.children);
+      }
+    };
+    visit(view.children);
+    // Deduplicate by position and type
+    const seen = new Set<string>();
+    return guides.filter(g => {
+      const key = `${g.type}-${Math.round(g.position)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   const findArrowBinding = (worldX: number, worldY: number, excludedNodeId?: string) => {
     if (!view) return null;
     let best: ViewerNode | null = null;
@@ -451,6 +521,23 @@ frame iPhone13:
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "e") {
         event.preventDefault();
         setShowCode((open) => !open);
+        return;
+      }
+      // Tool shortcuts (no modifier)
+      if (event.key.toLowerCase() === "v" && !(event.ctrlKey || event.metaKey)) {
+        setActiveTool(null); // Select
+        return;
+      }
+      if (event.key.toLowerCase() === "h" && !(event.ctrlKey || event.metaKey)) {
+        setActiveTool("hand");
+        return;
+      }
+      if (event.key.toLowerCase() === "e" && !(event.ctrlKey || event.metaKey)) {
+        setActiveTool("eraser");
+        return;
+      }
+      if (event.key.toLowerCase() === "l" && !(event.ctrlKey || event.metaKey)) {
+        setActiveTool("lasso");
         return;
       }
       if (selectedIds.length && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
@@ -787,7 +874,7 @@ frame iPhone13:
       return;
     }
 
-    // Rotation: preview rotation via transform
+    // Rotation: preview rotation via transform on inner rotated group
     if (rotationState) {
       const world = getCanvasWorldPoint(e);
       const dx = world.x - rotationState.center.x;
@@ -795,7 +882,7 @@ frame iPhone13:
       const currentAngle = Math.atan2(dy, dx);
       const deltaDeg = (currentAngle - rotationState.startAngle) * (180 / Math.PI);
       const nextRotation = rotationState.originalRotation + deltaDeg;
-      const el = nodeRefs.current[rotationState.nodeId];
+      const el = rotatedGroupRefs.current[rotationState.nodeId];
       if (el) {
         const cx = rotationState.center.x;
         const cy = rotationState.center.y;
@@ -808,6 +895,18 @@ frame iPhone13:
     const dx = (e.clientX - dragStartPos.current.x) / camera.z;
     const dy = (e.clientY - dragStartPos.current.y) / camera.z;
     currentDelta.current = { x: dx, y: dy };
+
+    // Snap guides during drag
+    if (draggingId && view) {
+      const dragged = findNodeById(view.children, draggingId);
+      if (dragged) {
+        const nx = Number(dragged.x ?? 0) + dx;
+        const ny = Number(dragged.y ?? 0) + dy;
+        const nw = Number(dragged.w ?? 0);
+        const nh = Number(dragged.h ?? 0);
+        setSnapGuides(computeSnapGuides(draggingId, nx, ny, nw, nh));
+      }
+    }
 
     const idsToMove = selectedIds.length > 1 && selectedIds.includes(draggingId) ? selectedIds : [draggingId];
     for (const id of idsToMove) {
@@ -851,8 +950,6 @@ frame iPhone13:
       const deltaDeg = (currentAngle - rotationState.startAngle) * (180 / Math.PI);
       let finalRotation = rotationState.originalRotation + deltaDeg;
       if (e.shiftKey) finalRotation = Math.round(finalRotation / 15) * 15;
-      const el = nodeRefs.current[rotationState.nodeId];
-      if (el) el.removeAttribute("transform");
       setRotationState(null);
       if (hasParseErrors) return;
       setDocument((prev) => editorMode.type === "component"
@@ -967,6 +1064,7 @@ frame iPhone13:
     const idToUpdate = draggingId;
     
     setDraggingId(null);
+    setSnapGuides([]);
     const idsToMove = selectedIds.length > 1 && selectedIds.includes(idToUpdate) ? selectedIds : [idToUpdate];
     for (const id of idsToMove) {
       const el = nodeRefs.current[id];
@@ -1027,6 +1125,7 @@ frame iPhone13:
     }
     if (!selectedIds.includes(nodeId)) queueSelection(nodeId);
     setDraggingId(nodeId);
+    setSnapGuides([]);
     e.currentTarget.setPointerCapture(e.pointerId);
     dragStartPos.current = { x: e.clientX, y: e.clientY };
     currentDelta.current = { x: 0, y: 0 };
@@ -1144,8 +1243,7 @@ frame iPhone13:
     const isDragging = draggingId === n.id;
     const shouldWrap = !n.instanceRootId || n.isInstanceRoot;
     const isLinear = isLinearNode(n);
-    const rotation = Number((n as any).rotation ?? 0);
-    const transform = rotation ? `rotate(${rotation}, ${x + w / 2}, ${y + h / 2})` : undefined;
+    const rotation = Number(n.rotation ?? 0);
     const linearPoints = isLinear ? getRenderedLinearPoints(renderNodeValue, x, y, w, h) : null;
     const linearOverlay = isSelected && isLinear && linearPoints ? (
       <>
@@ -1176,12 +1274,16 @@ frame iPhone13:
       <g pointerEvents="auto">
         <line x1={x + w / 2} y1={y} x2={x + w / 2} y2={y - 24} stroke="#2563eb" strokeWidth={2} />
         <circle cx={x + w / 2} cy={y - 24} r={7} fill="#ffffff" stroke="#2563eb" strokeWidth={2} style={{ cursor: "grab" }}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            const center = { x: x + w / 2, y: y + h / 2 };
-            const startAngle = Math.atan2((e as any).clientY - camera.y - center.y * camera.z, (e as any).clientX - camera.x - center.x * camera.z);
-            setRotationState({ nodeId: n.id, startAngle, center, originalRotation: rotation });
-          }}
+           onPointerDown={(e) => {
+             e.stopPropagation();
+             const center = { x: x + w / 2, y: y + h / 2 };
+             const svgEl = (e.target as Element).closest('svg');
+             const rect = svgEl?.getBoundingClientRect() || { left: 0, top: 0 };
+             const worldX = ((e as any).clientX - rect.left - camera.x) / camera.z;
+             const worldY = ((e as any).clientY - rect.top - camera.y) / camera.z;
+             const startAngle = Math.atan2(worldY - center.y, worldX - center.x);
+             setRotationState({ nodeId: n.id, startAngle, center, originalRotation: rotation });
+           }}
         />
       </g>
     ) : null;
@@ -1201,26 +1303,24 @@ frame iPhone13:
         renderChildren: () => <>{n.children?.map(renderNode)}</>,
         resolveNodeById: (id) => (view ? findNodeById(view.children, id) : null),
       });
-      if (!shouldWrap) return <React.Fragment key={n.id}>{transform ? <g transform={transform}>{rendered}</g> : rendered}</React.Fragment>;
-      const rotatedContent = transform ? <g transform={transform}>{rendered}</g> : rendered;
+      if (!shouldWrap) return <React.Fragment key={n.id}>{rendered}</React.Fragment>;
       return (
-        <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} disabled={(activeTool && activeTool !== "eraser") || Boolean(resizeState) || Boolean(linearEditState)} isSelected={isSelected} isDragging={isDragging} canResize={isResizableNode(n) && !isLinear} nodeRefs={nodeRefs} onPointerDown={handlePointerDownNode} onResizeStart={handleResizeStart} onDoubleClick={handleDoubleClickNode} overlay={<>
+        <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} disabled={(activeTool && activeTool !== "eraser") || Boolean(resizeState) || Boolean(linearEditState)} isSelected={isSelected} isDragging={isDragging} canResize={isResizableNode(n) && !isLinear} rotation={rotation} nodeRefs={nodeRefs} rotatedGroupRefs={rotatedGroupRefs} onPointerDown={handlePointerDownNode} onResizeStart={handleResizeStart} onDoubleClick={handleDoubleClickNode} overlay={<>
           {linearOverlay}
           {rotationOverlay}
         </>}>
-          {rotatedContent}
+          {rendered}
         </NodeWrapper>
       );
     }
 
     if (n.children?.length) {
       const childContent = n.children.map(renderNode);
-      const rotatedChildren = transform ? <g transform={transform}>{childContent}</g> : childContent;
-      if (!shouldWrap) return <React.Fragment key={n.id}>{rotatedChildren}</React.Fragment>;
-      return <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} disabled={(activeTool && activeTool !== "eraser") || Boolean(resizeState) || Boolean(linearEditState)} isSelected={isSelected} isDragging={isDragging} canResize={isResizableNode(n) && !isLinear} nodeRefs={nodeRefs} onPointerDown={handlePointerDownNode} onResizeStart={handleResizeStart} onDoubleClick={handleDoubleClickNode} overlay={<>
+      if (!shouldWrap) return <React.Fragment key={n.id}>{childContent}</React.Fragment>;
+      return <NodeWrapper key={n.id} nodeId={n.id} x={x} y={y} w={w} h={h} disabled={(activeTool && activeTool !== "eraser") || Boolean(resizeState) || Boolean(linearEditState)} isSelected={isSelected} isDragging={isDragging} canResize={isResizableNode(n) && !isLinear} rotation={rotation} nodeRefs={nodeRefs} rotatedGroupRefs={rotatedGroupRefs} onPointerDown={handlePointerDownNode} onResizeStart={handleResizeStart} onDoubleClick={handleDoubleClickNode} overlay={<>
         {linearOverlay}
         {rotationOverlay}
-      </>}>{rotatedChildren}</NodeWrapper>;
+      </>}>{childContent}</NodeWrapper>;
     }
 
     return null;
@@ -1258,6 +1358,18 @@ frame iPhone13:
     if (!lassoState || lassoState.points.length < 2) return null;
     const points = lassoState.points.map(p => `${p[0]},${p[1]}`).join(" ");
     return <polygon points={points} fill="#60a5fa22" stroke="#2563eb" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />;
+  };
+
+  const renderSnapGuides = () => {
+    if (!snapGuides.length) return null;
+    const viewW = typeof window !== "undefined" ? window.innerWidth : 2000;
+    const viewH = typeof window !== "undefined" ? window.innerHeight : 2000;
+    return snapGuides.map((guide, i) => {
+      if (guide.type === "vertical") {
+        return <line key={`vg-${i}`} x1={guide.position} y1={0} x2={guide.position} y2={viewH} stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />;
+      }
+      return <line key={`hg-${i}`} x1={0} y1={guide.position} x2={viewW} y2={guide.position} stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />;
+    });
   };
 
   const canvasCursor = activeTool === "hand" ? "grab" : activeTool === "eraser" ? "pointer" : activeTool ? "crosshair" : "default";
@@ -1425,6 +1537,7 @@ frame iPhone13:
             {renderDraftShape()}
             {renderSelectionBox()}
             {renderLasso()}
+            {renderSnapGuides()}
           </CanvasShell>
         )}
 
