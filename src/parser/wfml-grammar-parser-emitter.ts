@@ -363,7 +363,7 @@ function parseNodeBlock(C: ParseContext, indent: number, node: any, canHaveChild
 function assignNodeKey(node: any, key: string, value: any, line: number, C: ParseContext) {
   const baseKeys = new Set(["id","name","z","lock","hidden","opacity","x","y","w","h","rotation","tags"]);
   const styleKeys = new Set(["fill","stroke","strokeWidth","strokeStyle","dash","corner","edges","shadow","sketch","roughness","seed"]);
-  const textStyleKeys = new Set(["font","size","weight","align","wrap","autoSize"]);
+  const textStyleKeys = new Set(["font","size","weight","color","opacity","align","wrap","autoSize"]);
 
   if (key === "place") { node.place = parsePlacement(String(value), line, C); return; }
   if (key === "style" && typeof value === "object") { node.style = { ...(node.style||{}), ...value }; return; }
@@ -375,8 +375,8 @@ function assignNodeKey(node: any, key: string, value: any, line: number, C: Pars
   if (node.kind === "image" && key === "src") { node.src = String(value); return; }
   if (node.kind === "image" && key === "fit") { node.fit = value; return; }
   if ((node.kind === "line" || node.kind === "arrow") && (key === "from" || key === "to")) { (node as any)[key] = parseAnchor(String(value)); return; }
+  if ((node.kind === "line" || node.kind === "arrow" || node.kind === "polyline" || node.kind === "freehand") && key === "points") { (node as any)[key] = value; return; }
   if ((node.kind === "arrow") && (key === "startHead" || key === "endHead" || key === "route")) { (node as any)[key] = value; return; }
-  if ((node.kind === "polyline" || node.kind === "freehand") && key === "points") { (node as any)[key] = value; return; }
   if (key === "text" && textStyleKeys.has("size") === false) { node.text = value; return; }
 
   if (key.includes(".")) { setDeep(node, key, value); return; }
@@ -553,6 +553,14 @@ function emitNodeBody(b: string[], n: any, level: number, IND: string, includeCh
   for (const k of ["x","y","w","h","rotation","opacity","z","lock","hidden","name"]) if (n[k] !== undefined) kv[k] = n[k];
   if (n.text !== undefined) kv.text = n.text;
   if (n.kind === "image") { kv.src = n.src; if (n.fit) kv.fit = n.fit }
+  if ((n.kind === "line" || n.kind === "arrow" || n.kind === "polyline" || n.kind === "freehand") && n.points) kv.points = n.points;
+  if ((n.kind === "line" || n.kind === "arrow") && n.from) kv.from = n.from;
+  if ((n.kind === "line" || n.kind === "arrow") && n.to) kv.to = n.to;
+  if (n.kind === "arrow") {
+    if (n.startHead) kv.startHead = n.startHead;
+    if (n.endHead) kv.endHead = n.endHead;
+    if (n.route) kv.route = n.route;
+  }
   if (n.kind === "instance") { if (n.of) kv.of = n.of; if (n.overrides) kv.overrides = n.overrides }
   emitKV(b, kv, level, IND);
   emitStyle(b, n.style, level, IND);

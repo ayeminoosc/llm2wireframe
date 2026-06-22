@@ -446,6 +446,29 @@ export function updateNodePropertyInSource(src: string, nodeId: string, property
   return emitWFML(doc);
 }
 
+export function updateNodePropertiesInSource(src: string, nodeId: string, updates: Record<string, any>): string {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  if (!doc?.children) return src;
+
+  const updateNode = (nodes: any[]): boolean => {
+    for (const node of nodes) {
+      if (node.id === nodeId) {
+        for (const [propertyPath, value] of Object.entries(updates)) {
+          setDeepValue(node, propertyPath, value);
+        }
+        return true;
+      }
+      if (node.children && updateNode(node.children)) return true;
+    }
+    return false;
+  };
+
+  if (!updateNode(doc.children)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
 export function deleteNodeFromSource(src: string, nodeId: string): string {
   const res = parseWFML(src) as any;
   const doc = res.doc;
@@ -464,6 +487,29 @@ export function deleteNodeFromSource(src: string, nodeId: string): string {
   };
 
   if (!removeNode(doc.children)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function deleteNodesFromSource(src: string, nodeIds: string[]): string {
+  const ids = new Set(nodeIds);
+  if (!ids.size) return src;
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  if (!doc?.children) return src;
+
+  const removeNodes = (nodes: any[]) => {
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const node = nodes[i];
+      if (ids.has(node.id)) {
+        nodes.splice(i, 1);
+        continue;
+      }
+      if (node.children) removeNodes(node.children);
+    }
+  };
+
+  removeNodes(doc.children);
   inferDocumentSemantics(doc);
   return emitWFML(doc);
 }
@@ -573,6 +619,30 @@ export function updateComponentNodePropertyInSource(src: string, componentId: st
   return emitWFML(doc);
 }
 
+export function updateComponentNodePropertiesInSource(src: string, componentId: string, nodeId: string, updates: Record<string, any>): string {
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  const component = findComponentContext(doc?.components, componentId);
+  if (!component?.nodes) return src;
+
+  const updateNode = (nodes: any[]): boolean => {
+    for (const node of nodes) {
+      if (node.id === nodeId) {
+        for (const [propertyPath, value] of Object.entries(updates)) {
+          setDeepValue(node, propertyPath, value);
+        }
+        return true;
+      }
+      if (node.children && updateNode(node.children)) return true;
+    }
+    return false;
+  };
+
+  if (!updateNode(component.nodes)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
 export function deleteComponentNodeFromSource(src: string, componentId: string, nodeId: string): string {
   const res = parseWFML(src) as any;
   const doc = res.doc;
@@ -589,6 +659,83 @@ export function moveComponentNodeInSource(src: string, componentId: string, node
   const component = findComponentContext(doc?.components, componentId);
   if (!component?.nodes) return src;
   if (!updateAstNode(component.nodes, nodeId, dx, dy)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function moveNodesInSource(src: string, nodeIds: string[], dx: number, dy: number): string {
+  const ids = new Set(nodeIds);
+  if (!ids.size) return src;
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  if (!doc?.children) return src;
+
+  const updateNodes = (nodes: any[]): boolean => {
+    let moved = false;
+    for (const node of nodes) {
+      if (ids.has(node.id)) {
+        shiftAstSubtree(node, Math.round(dx), Math.round(dy));
+        node.place = undefined;
+        moved = true;
+        continue;
+      }
+      if (node.children && updateNodes(node.children)) moved = true;
+    }
+    return moved;
+  };
+
+  if (!updateNodes(doc.children)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function moveComponentNodesInSource(src: string, componentId: string, nodeIds: string[], dx: number, dy: number): string {
+  const ids = new Set(nodeIds);
+  if (!ids.size) return src;
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  const component = findComponentContext(doc?.components, componentId);
+  if (!component?.nodes) return src;
+
+  const updateNodes = (nodes: any[]): boolean => {
+    let moved = false;
+    for (const node of nodes) {
+      if (ids.has(node.id)) {
+        shiftAstSubtree(node, Math.round(dx), Math.round(dy));
+        node.place = undefined;
+        moved = true;
+        continue;
+      }
+      if (node.children && updateNodes(node.children)) moved = true;
+    }
+    return moved;
+  };
+
+  if (!updateNodes(component.nodes)) return src;
+  inferDocumentSemantics(doc);
+  return emitWFML(doc);
+}
+
+export function deleteComponentNodesFromSource(src: string, componentId: string, nodeIds: string[]): string {
+  const ids = new Set(nodeIds);
+  if (!ids.size) return src;
+  const res = parseWFML(src) as any;
+  const doc = res.doc;
+  const component = findComponentContext(doc?.components, componentId);
+  if (!component?.nodes) return src;
+
+  const removeNodes = (nodes: any[]) => {
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const node = nodes[i];
+      if (ids.has(node.id)) {
+        nodes.splice(i, 1);
+        continue;
+      }
+      if (node.children) removeNodes(node.children);
+    }
+  };
+
+  removeNodes(component.nodes);
   inferDocumentSemantics(doc);
   return emitWFML(doc);
 }

@@ -32,10 +32,11 @@ function renderSwatchFill(swatch?: string) {
 
 export function PropertyInspectorPanel({ selectedNode, definition, editingTextNodeId = null, onChangeProperty, onChangeInstanceOverride }: Props) {
   const properties = (definition?.properties || []).filter((property) => {
-    if (selectedNode?.kind !== "rect") return true;
-    const isRectTextProperty = property.key === "text" || property.key.startsWith("style.text.");
-    if (!isRectTextProperty) return true;
-    return editingTextNodeId === selectedNode.id;
+    const supportsBoundText = selectedNode?.kind === "rect" || selectedNode?.kind === "ellipse" || selectedNode?.kind === "diamond";
+    if (!supportsBoundText) return true;
+    const isTextProperty = property.key === "text" || property.key.startsWith("style.text.");
+    if (!isTextProperty) return true;
+    return editingTextNodeId === selectedNode?.id;
   });
   const propertyGroups = groupProperties(properties);
   const instanceProps = selectedNode?.isInstanceRoot ? Object.entries(selectedNode.componentProps || {}) : [];

@@ -9,14 +9,24 @@ export type ViewerNode = {
   y?: number;
   w?: number | "fill" | "hug" | "auto";
   h?: number | "fill" | "hug" | "auto";
+  rotation?: number;
   text?: string;
+  points?: [number, number][];
   src?: string;
+  from?: { ref: string; anchor?: "center" | "top" | "bottom" | "left" | "right" | "auto" };
+  to?: { ref: string; anchor?: "center" | "top" | "bottom" | "left" | "right" | "auto" };
+  startHead?: string;
+  endHead?: string;
+  route?: string;
   style?: {
     fill?: string;
     stroke?: string;
     strokeWidth?: number;
+    strokeStyle?: "solid" | "dashed" | "dotted";
+    roughness?: number;
+    edges?: "sharp" | "round";
     corner?: number;
-    text?: { size?: number; weight?: number; align?: "left" | "center" | "right" };
+    text?: { size?: number; weight?: number; color?: string; opacity?: number; font?: string; align?: "left" | "center" | "right" };
   };
   place?: PlacementRule[];
   direction?: "row" | "column";
@@ -107,12 +117,22 @@ export function mapDoc(astDoc: any): ViewerDoc {
       y: n.y,
       w: n.w,
       h: n.h,
+      rotation: n.rotation,
       text: n.text,
+      points: n.points,
       src: n.src,
+      from: n.from,
+      to: n.to,
+      startHead: n.startHead,
+      endHead: n.endHead,
+      route: n.route,
       style: {
         fill: n.style?.fill,
         stroke: n.style?.stroke,
         strokeWidth: n.style?.strokeWidth,
+        strokeStyle: n.style?.strokeStyle,
+        roughness: n.style?.roughness,
+        edges: n.style?.edges,
         corner: n.style?.corner,
         text: n.style?.text,
       },

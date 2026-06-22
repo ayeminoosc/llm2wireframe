@@ -112,6 +112,7 @@ export interface ConnectorBase extends NodeBase {
   from?: AnchorRef;
   to?: AnchorRef;
   label?: string;
+  points?: [number, number][];
 }
 
 export interface Line extends ConnectorBase { kind: "line" }
@@ -128,7 +129,7 @@ export interface Sticky extends NodeBase { kind: "sticky"; text: string; color?:
 export interface Group extends NodeBase { kind: "group"; children: Node[] }
 export interface Instance extends NodeBase { kind: "instance"; of: string; overrides?: Record<string, any> }
 
-export type ArrowHead = "none" | "arrow" | "triangle" | "circle" | "diamond";
+export type ArrowHead = "none" | "arrow" | "triangle" | "circle" | "diamond" | "bar";
 export type AnchorRef = { ref: string; anchor?: "center" | "top" | "bottom" | "left" | "right" | "auto" };
 
 export type PlacementRule =

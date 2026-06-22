@@ -31,6 +31,7 @@ export type NodeRenderArgs = {
   strokeWidth: number;
   corner: number;
   renderChildren: () => ReactNode;
+  resolveNodeById: (id: string | null) => ViewerNode | null;
 };
 
 export type NodeDefinition = {
