@@ -1,32 +1,114 @@
-# Product Roadmap: The Interactive WFML Canvas
+# Product Roadmap
 
 ## Vision
-Transform `llm2wireframe` from a static previewer into a fully interactive, Excalidraw-style canvas. The human interacts visually (drag, drop, resize), while the underlying system seamlessly translates these actions back into the semantic WFML text format, allowing an LLM to perfectly understand and co-edit the design in real-time.
 
-## Phase 1: The Interactive Canvas (Drag & Drop)
-The goal of this phase is to make the SVG elements selectable and movable, establishing the foundation of the Excalidraw feel.
+Transform llm2wireframe into the definitive tool for human-AI co-creation of wireframes — where humans draw intuitively and LLMs understand, reason about, and co-edit the design through a structured text format (WFML).
 
-*   **Interaction State Management:** Introduce a global state in the React viewer to track `selectedNodeId`, `isDragging`, and mouse cursor coordinates.
-*   **Draggable Primitives:** Wrap the core SVG rendering functions (`rect`, `text`, `image`) with `onMouseDown`, `onMouseMove`, and `onMouseUp` event handlers.
-*   **Visual Feedback:** Add a selection bounding box (a blue outline with resize handles) around the currently active node.
-*   **Coordinate Mutation:** When a drag completes, update the internal AST with the new absolute `x` and `y` coordinates.
+## Completed Milestones
 
-## Phase 2: The Inverse Layout Solver (The Brains)
-This is the hardest and most important phase. We must translate the human's raw mouse movements back into the semantic `place` rules or `flex` structures the LLM relies on.
+### ✅ Phase 1: Interactive Canvas Foundation
+- [x] Infinite canvas with SVG rendering
+- [x] Camera system (pan, zoom, fit-to-bounds)
+- [x] Node selection with visual feedback
+- [x] Drag and drop with direct DOM manipulation
+- [x] Scene graph mapping (AST → ViewerDoc)
+- [x] Layout engine (placement rules, flex containers)
+- [x] Node registry system
+- [x] Built-in component library (11 primitives)
+- [x] Property inspector panel
+- [x] Code editor with bidirectional sync
+- [x] Undo/Redo document history
+- [x] Component system (define, instantiate, override)
 
-*   **Dropzone Detection (Flex):** If a node is dropped inside the bounds of a `flex` container, automatically strip its absolute coordinates and append it to the container's `children` array. The Flex engine will automatically snap it into the stack.
-*   **Magnetic Snapping (Relative Rules):** Implement a proximity heuristic. As the user drags a node, check the distance to sibling nodes. If the node's top edge is within ~16px of sibling A's bottom edge, snap it and update the AST to `place: below #A by 16`.
-*   **Bi-Directional Emitter:** Once the solver updates the AST, run the `emitWFML()` function to regenerate the WFML string and instantly update the text in the left-hand code editor. 
+### ✅ Phase 2: Draw Tools & Interaction
+- [x] Excalidraw-style draw tools (click → drag → create)
+- [x] Rect, Ellipse, Diamond, Arrow, Line, Freehand, Text, Image, Sticky, Frame, Flex
+- [x] 8-handle resize system with live preview
+- [x] Arrow features (arrowheads, routes, from/to bindings)
+- [x] Freehand path capture with points array
+- [x] Linear endpoint editing (circular handles)
+- [x] Inline text editing (double-click textarea)
+- [x] Multi-select (Ctrl+Click, marquee, group drag/delete)
+- [x] Hand tool (canvas panning)
+- [x] Eraser tool (click/drag erase)
+- [x] Lasso selection (polygon ray-casting)
+- [x] Rotation (handle, live preview, commit, 15° snap)
+- [x] Visual snap guides (alignment during drag)
+- [x] Keyboard shortcuts (V, H, E, L, Delete, Escape)
+- [x] Property inspector redesign (swatches, sliders, button groups)
+- [x] Component mode editing (edit nodes inside components)
 
-## Phase 3: Canvas Tooling & Extensibility
-Fleshing out the Excalidraw experience.
+### ✅ Phase 3: Architecture Hardening
+- [x] Engine extraction (scene, layout, camera, commands, registry)
+- [x] Core library primitives (render, create, properties, tool)
+- [x] Node definition contract
+- [x] Parser/emitter with flat-root children model
+- [x] AST types in wfml-core
+- [x] Semantic inference pass (basic)
+- [x] Component expansion (instance → expanded nodes)
 
-*   **Toolbar & Insertion:** Add a toolbar to the UI allowing the human to select a "Rectangle Tool" or "Text Tool", click the canvas, and instantly insert a new node into the AST.
-*   **Property Inspector:** Add a right-hand sidebar panel (like Figma/Excalidraw) where humans can tweak colors, text sizes, and flex gaps visually, instantly updating the underlying WFML code.
+## Next Milestones
 
-## Phase 4: The AI Co-Pilot (LLM Integration)
-Connecting the engine to an AI agent to achieve the ultimate goal: human-AI co-creation.
+### Phase 4: Polish & Power Features (Next)
+- [ ] Multi-select copy/paste/duplicate (Ctrl+C/V/D)
+- [ ] Ctrl+A select all, Ctrl+Shift+A deselect all
+- [ ] Distribute align tools (align left/center/right/top/bottom)
+- [ ] Group/ungroup with dedicated group node kind
+- [ ] Connector routing improvement (midpoint handles, route editing)
+- [ ] Arrow from/to binding visual editing (drag endpoints to nodes)
+- [ ] Zoom to selection, zoom to fit
+- [ ] Canvas minimap
+- [ ] Export to PNG/SVG/PDF
 
-*   **MCP Server / API Route:** Expose the WFML state via a Model Context Protocol (MCP) server or a Next.js API route.
-*   **The System Prompt:** Craft the definitive "System Prompt" that teaches the LLM how to speak WFML fluently, including the new `flex` containers and sizing rules (`w: fill`, `h: hug`).
-*   **Integrated Chat (Optional):** Build a chat interface directly into the UI where the human can type "Make the login button wider", the LLM streams back a WFML patch, and the UI updates live.
+### Phase 5: Plugin System
+- [ ] Formal registerPlugin() API
+- [ ] Plugin runtime in engine
+- [ ] Custom node kinds via plugins
+- [ ] Custom toolbar tools
+- [ ] Custom property inspectors
+- [ ] Plugin packs: mobile UI, system diagrams, user flows
+- [ ] Plugin marketplace / registry
+
+### Phase 6: Rich Semantic Inference
+- [ ] Container membership inference (detect nested structures)
+- [ ] Flex/container intent detection from layout patterns
+- [ ] Semantic role inference (button, input, card, nav, modal)
+- [ ] Connector meaning inference (flow direction, relationship)
+- [ ] Auto-normalization after visual edits
+- [ ] Semantic export with enriched metadata
+
+### Phase 7: AI Co-Pilot Integration
+- [ ] MCP server for WFML state
+- [ ] System prompt for WFML fluency
+- [ ] Integrated chat panel
+- [ ] Natural language edits → WFML patches → live canvas update
+- [ ] AI-assisted layout suggestions
+- [ ] Component auto-generation from description
+- [ ] Design critique and accessibility checking
+
+### Phase 8: Collaboration & Sharing
+- [ ] Real-time collaboration (multi-cursor)
+- [ ] Shareable links / embeds
+- [ ] Version history with branching
+- [ ] Import from Figma/Sketch/Excalidraw
+- [ ] Export to design specs
+
+## Technology Stack
+
+- **Runtime:** Node.js, Next.js 15
+- **UI:** React 18, TypeScript
+- **Rendering:** SVG with React refs for performance
+- **State:** React useState/useRef, document string as source of truth
+- **Build:** Next.js, npm
+- **Testing:** Jest (planned)
+
+## Key Metrics
+
+| Metric | Current | Target |
+|---|---|---|
+| Built-in node kinds | 11 | 20+ (with plugins) |
+| Engine commands | 29 | 40+ |
+| Draw tools | 11 | 11 (complete) |
+| Interaction tools | 5 (select, hand, eraser, lasso, draw) | 8+ |
+| Plugin packs | 0 | 3+ |
+| Test coverage | 0% | 80%+ |

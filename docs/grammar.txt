@@ -1,13 +1,48 @@
-document       := meta? assets? components? rootNodes+
-rootNodes       := node+
-block          := NEWLINE INDENT (kvpair | section | shape | group | frame | use)+ DEDENT
-section        := ("assets" | "components" | "meta") block
-frame          := "frame" ident block
-group          := "group" ident block
-use            := "use" ident block
-shape          := (rect|ellipse|diamond|text|icon|image|arrow|line|polyline|sticky|freehand|flex|plugin-kind) ident block
-node           := frame | group | use | shape
-kvpair         := key ":" value
-key            := ident ( "." ident )*
-value          := string | number | bool | enum | list | ref
-ref            := "#" ident
+# WFML Grammar (EBNF-style)
+
+document     := meta? assets? components? (node)*
+meta         := "meta" ":" NEWLINE block
+assets       := "assets" ":" NEWLINE asset+
+components   := "components" ":" NEWLINE component+
+component    := "component" ident NEWLINE block
+node         := kind ident NEWLINE block
+block        := INDENT (kvpair | section)* DEDENT
+section      := ("style" | "semantic" | "props" | "place") ":" NEWLINE block
+kvpair       := key ":" value
+key          := ident ( "." ident )*
+kind         := "frame" | "rect" | "ellipse" | "diamond" | "text" | "icon" | "image"
+             | "line" | "arrow" | "polyline" | "freehand" | "sticky" | "group" | "flex"
+             | "use"
+value        := number | string | bool | color | list | object | enum | ref
+string       := '"' text '"' | "'" text "'" | unquoted_text
+number       := [-+] [0-9]+ [. [0-9]+]
+bool         := "true" | "false"
+color        := "#" hex{3,8}
+list         := "[" value ("," value)* "]"
+object       := "{" key ":" value ("," key ":" value)* "}"
+enum         := "fill" | "hug" | "auto" | "solid" | "dashed" | "dotted" | ...
+ref          := "#" ident
+ident        := [a-zA-Z_][a-zA-Z0-9_-]*
+
+# Placement rules
+place        := "centered" "in" ref
+             | "centerX" "in" ref
+             | "centerY" "in" ref
+             | "below" ref ("by" number)?
+             | "above" ref ("by" number)?
+             | "rightOf" ref ("by" number)?
+             | "leftOf" ref ("by" number)?
+             | "inside" ref ("inset" number)?
+             | "alignLeft" "with" ref
+             | "alignRight" "with" ref
+             | "alignTop" "with" ref
+             | "alignBottom" "with" ref
+
+# Arrow routing
+route        := "straight" | "orthogonal" | "curve"
+
+# Arrowheads
+arrowhead    := "none" | "arrow" | "triangle" | "circle" | "diamond" | "bar"
+
+# Anchor points
+anchor       := "center" | "top" | "bottom" | "left" | "right" | "auto"
